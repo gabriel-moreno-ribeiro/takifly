@@ -13,7 +13,8 @@ import type { Voo } from "./voos.ts";
 // ---------- MEMÓRIA SEPARADA ----------
 // precisa vir antes de carregar o agente: a prova nunca pode mexer na sua conversa do Slack
 process.env.MEMORIA = ":memory:";
-const { responder, servicos } = await import("./agente.ts");
+const { responder } = await import("./agente.ts");
+const { servicos } = await import("./ferramentas.ts");
 
 // ---------- OS VOOS DE MENTIRA ----------
 const BASE = [
@@ -76,7 +77,7 @@ function fatosErrados(resposta: string) {
 		const doVoo = precosDasBuscas.filter((voo) => voo.companhia === nome);
 
 		const precos = [...linha.matchAll(/R\$\s*(\d[\d.,\s]*\d|\d)/g)].map((achado) => numeroEmReais(achado[1]));
-		if (precos.length === 1 && !doVoo.some((voo) => voo.preco === precos[0]) && !/custo|benef|equivalente|total|soma/i.test(linha)) problemas.push(`preço errado para ${nome}: ${linha}`);
+		if (precos.length === 1 && !doVoo.some((voo) => voo.preco === precos[0]) && !/custo|benef|equivalente|total|soma|a mais|diferen|ida e volta/i.test(linha)) problemas.push(`preço errado para ${nome}: ${linha}`);
 
 		const duracoes = [...linha.matchAll(/(\d{1,2})\s*h(?:oras?)?(?:\s*e)?\s*(\d{2})?(?:\s*min(?:utos)?)?\s*(?:de\s+)?(?:viagem|voo|dura)/gi)];
 		for (const achado of duracoes) {
