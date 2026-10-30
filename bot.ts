@@ -9,6 +9,9 @@ import { App } from "@slack/bolt";
 // puxa a função responder do NOSSO arquivo harness/agente.ts (o "./" quer dizer "aqui nesta mesma pasta")
 import { responder } from "./harness/agente.ts";
 
+// puxa o relógio que confere os preços sozinho
+import { ligarMonitor } from "./harness/monitor.ts";
+
 // ---------- CHAVES ----------
 // lê o arquivo .env e guarda cada chave em process.env (depois esse process.env vai dar o valor da chave API em si ao process.env.SLACK_BOT_TOKEN
 process.loadEnvFile(".env");
@@ -71,3 +74,7 @@ app.message(async ({ message, say, client }) => {
 // ---------- LIGAR ----------
 await app.start();
 console.log("Bot ligado no Slack! Ctrl+C para desligar.");
+
+// ---------- MONITORAMENTOS ----------
+// aqui o bot fala sem ninguém ter perguntado: o aviso vai para a conversa onde o monitoramento foi criado
+ligarMonitor((conversa, texto) => app.client.chat.postMessage({ channel: conversa, text: texto }));

@@ -20,8 +20,10 @@ import { BASE, catalogo, type Cenario, cenarios, proximoDia } from "./cenarios.t
 // ---------- MEMÓRIA SEPARADA ----------
 // precisa vir antes de carregar o agente: a prova nunca pode mexer na sua conversa do Slack
 process.env.MEMORIA = ":memory:";
+process.env.DADOS = ":memory:";
 const { responder } = await import("./agente.ts");
 const { servicos } = await import("./ferramentas.ts");
+const { listarMonitoramentos, listarPreferencias } = await import("./dados.ts");
 const { anotar, enviarRastreio } = await import("./rastreio.ts");
 
 // ---------- OS SERVIÇOS DE MENTIRA ----------
@@ -113,7 +115,7 @@ const PEDIDO = "voos de GRU para LIS em 12/12";
 
 // ---------- OS CASOS ----------
 // cada caso tem as mensagens enviadas e uma função que devolve a lista de problemas (vazia = passou)
-type Resultado = { respostas: string[]; ultima: string };
+type Resultado = { respostas: string[]; ultima: string; conversa?: string };
 
 const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string[] }[] = [
 	{
@@ -352,6 +354,19 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 ];
 
 // ---------- TRANSFORMAR OS CENÁRIOS EM CASOS ----------
+// o que ficou guardado no banco de dados no fim da conversa
+function juizDosDados(c: Cenario, conversa: string) {
+	const ativos = listarMonitoramentos(conversa) as Record<string, unknown>[];
+	const guardadas = listarPreferencias(conversa).map((preferencia) => preferencia.texto);
+	const achou = c.monitora && ativos.some((ativo) => Object.entries(c.monitora!).every(([campo, valor]) => ativo[campo] === valor));
+	return [
+		...(c.monitora ? exigir(Boolean(achou), `não criou o monitoramento ${JSON.stringify(c.monitora)}; há ${JSON.stringify(ativos.map((ativo) => [ativo.origens, ativo.destinos, ativo.data, ativo.preco_alvo]))}`) : []),
+		...(c.semMonitor ? exigir(ativos.length === 0, "criou um monitoramento sem poder") : []),
+		...(c.preferencia ? exigir(guardadas.some((texto) => c.preferencia!.test(texto)), `não guardou a preferência; há ${JSON.stringify(guardadas)}`) : []),
+		...(c.semPreferencia ? exigir(guardadas.length === 0, `a preferência continua guardada: ${JSON.stringify(guardadas)}`) : []),
+	];
+}
+
 function juizDoCenario(c: Cenario) {
 	return (r: Resultado) => {
 		const fez = (filtro: Record<string, unknown>) => buscas.some((busca) => Object.entries(filtro).every(([campo, valor]) => busca[campo] === valor));
@@ -364,8 +379,9 @@ function juizDoCenario(c: Cenario) {
 			...(c.cita ?? []).flatMap((valor) => citou(r.ultima, valor)),
 			...(c.tem ? exigir(c.tem.test(r.ultima), `faltou ${c.tem}: ${inicio}`) : []),
 			...(c.naoTem ? exigir(!c.naoTem.test(r.ultima), `não podia ter ${c.naoTem}: ${inicio}`) : []),
-			...(c.pergunta ? exigir(/\?|informe|preciso saber|me diga/i.test(r.ultima), `não perguntou: ${inicio}`) : []),
+			...(c.pergunta ? exigir(/\?|informe|preciso saber|me dig|me diz/i.test(r.ultima), `não perguntou: ${inicio}`) : []),
 			...(c.semPreco ? semReais(r.ultima) : []),
+			...juizDosDados(c, r.conversa ?? ""),
 		];
 	};
 }
@@ -420,6 +436,7 @@ for (const caso of selecionados) {
 	let ultima = "";
 	let erro = "";
 	try {
+		// os juízes de monitoramento olham o banco de dados, que é o mesmo durante a prova inteira: cada conversa só vê os seus
 		const conversar = async () => {
 			const respostas: string[] = [];
 			for (const mensagem of caso.mensagens) respostas.push(normalizar(await responder(conversa, mensagem)));
@@ -429,7 +446,7 @@ for (const caso of selecionados) {
 		const limite = new Promise<never>((_, rejeitar) => setTimeout(() => rejeitar(new Error("passou de 8 minutos")), TEMPO_MAXIMO).unref());
 		const respostas = await Promise.race([conversar(), limite]);
 		ultima = respostas.at(-1)!;
-		problemas = [...caso.juiz({ respostas, ultima }), ...fatosErrados(respostas.join("\n"))];
+		problemas = [...caso.juiz({ respostas, ultima, conversa }), ...fatosErrados(respostas.join("\n"))];
 	} catch (falha: any) {
 		erro = falha.message;
 		problemas = ["o bot quebrou: " + erro];

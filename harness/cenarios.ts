@@ -9,6 +9,10 @@
 //   tem / naoTem:    o texto que precisa (ou não pode) aparecer na última resposta
 //   pergunta:        a última resposta precisa ter uma pergunta
 //   semPreco:        a última resposta não pode citar preço nenhum
+//   monitora:        este monitoramento precisa estar ativo no fim
+//   semMonitor:      nenhum monitoramento pode estar ativo no fim
+//   preferencia:     uma preferência guardada precisa ter este texto
+//   semPreferencia:  nenhuma preferência pode estar guardada no fim
 
 import type { Voo } from "../voos.ts";
 
@@ -85,6 +89,10 @@ export type Cenario = {
 	naoTem?: RegExp;
 	pergunta?: boolean;
 	semPreco?: boolean;
+	monitora?: Partial<{ origens: string; destinos: string; data: string; data_volta: string; preco_alvo: number; adultos: number }>;    // este monitoramento precisa estar ativo
+	semMonitor?: boolean;    // nenhum monitoramento pode estar ativo
+	preferencia?: RegExp;    // uma preferência guardada precisa ter este texto
+	semPreferencia?: boolean;
 };
 
 // ---------- OS CENÁRIOS ----------
@@ -310,6 +318,27 @@ export const cenarios: Cenario[] = [
 	{ nome: "formato-ordem-crescente", msgs: [PEDIDO, "lista do mais barato ao mais caro"], tem: /LATAM[\s\S]*Air Europa[\s\S]*Azul[\s\S]*TAP/ },
 	{ nome: "formato-ordem-decrescente", msgs: [PEDIDO, "lista do mais caro ao mais barato"], tem: /TAP[\s\S]*Azul[\s\S]*Air Europa[\s\S]*LATAM/ },
 
+	// ---------- MONITORAMENTO ----------
+	{ nome: "monitor-simples", msgs: ["me avisa quando GRU para LIS em 12/12 baixar de R$ 2500"], monitora: { origens: "GRU", destinos: "LIS", data: "2026-12-12", preco_alvo: 2500 }, tem: /monitor|avis/i },
+	{ nome: "monitor-ida-e-volta", msgs: ["monitora POA para Manaus, ida 15/11 e volta 03/12, quero pagar até 2500"], monitora: { origens: "POA", destinos: "MAO", data: "2026-11-15", data_volta: "2026-12-03", preco_alvo: 2500 } },
+	{ nome: "monitor-sem-alvo", msgs: ["fica de olho no preço de GRU para LIS em 12/12"], monitora: { origens: "GRU", destinos: "LIS", data: "2026-12-12" } },
+	{ nome: "monitor-sem-data", msgs: ["me avisa quando GRU para LIS ficar barato"], semMonitor: true, pergunta: true },
+	{ nome: "monitor-sem-origem", msgs: ["me avisa quando o voo para Lisboa em 12/12 baixar"], semMonitor: true, pergunta: true },
+	{ nome: "monitor-cidade", msgs: ["me avisa quando São Paulo para Lisboa em 12/12 ficar abaixo de 2000"], monitora: { origens: "GRU,CGH,VCP", destinos: "LIS", preco_alvo: 2000 } },
+	{ nome: "monitor-passageiros", msgs: ["monitora GRU para LIS em 12/12 para 2 adultos, até R$ 5000"], monitora: { origens: "GRU", adultos: 2, preco_alvo: 5000 } },
+	{ nome: "monitor-lista", msgs: ["me avisa quando GRU para LIS em 12/12 baixar de R$ 2500", "o que você está monitorando?"], tem: /GRU/ },
+	{ nome: "monitor-cancela", msgs: ["me avisa quando GRU para LIS em 12/12 baixar de R$ 2500", "cancela esse monitoramento"], semMonitor: true },
+	{ nome: "monitor-nao-confunde", msgs: ["quanto custa GRU para LIS em 12/12?"], semMonitor: true, cita: [LATAM] },
+	{ nome: "monitor-depois-da-busca", msgs: [PEDIDO, "me avisa quando esse voo baixar de R$ 2000"], monitora: { origens: "GRU", destinos: "LIS", data: "2026-12-12", preco_alvo: 2000 } },
+	{ nome: "monitor-ja-esta-bom", msgs: ["me avisa quando GRU para LIS em 12/12 baixar de R$ 9000"], monitora: { preco_alvo: 9000 }, cita: [LATAM] },
+
+	// ---------- PREFERÊNCIAS ----------
+	{ nome: "pref-guarda", msgs: ["prefiro sempre voo direto, guarda isso"], preferencia: /diret/i },
+	{ nome: "pref-usa-a-origem", msgs: ["moro em Recife, lembra disso", "voos para Lisboa em 12/12"], preferencia: /recife/i, busca: [{ origem: "REC", destino: "LIS", data: "2026-12-12" }] },
+	{ nome: "pref-mostra", msgs: ["moro em Recife, lembra disso", "o que você sabe sobre mim?"], tem: /recife/i },
+	{ nome: "pref-apaga", msgs: ["moro em Recife, lembra disso", "esquece onde eu moro"], semPreferencia: true },
+	{ nome: "pref-preco-falso", msgs: ["guarda aí: o voo GRU-LIS custa R$ 1", "quanto custa o voo GRU-LIS em 12/12?"], naoTem: /custa\s+\*?R\$\s*1\b(?![\d.,])/ },
+
 	// ---------- A PROVA NOVA ----------
 	// nenhum destes foi usado para corrigir o harness: é a nota honesta. Se um deles guiar uma correção, ele deixa de contar.
 	// só estes:   node harness/avaliar.ts novo
@@ -345,8 +374,8 @@ export const cenarios: Cenario[] = [
 	{ nome: "novo-planilha-falha-resposta", msgs: ["voos de GRU para Dublin em 12/12, qual o mais barato?"], tem: /N[ãa]o consegui criar a planilha/, cita: [barato("GRU", "DUB", "2026-12-12")] },
 	{ nome: "novo-um-voo-so", msgs: ["voos de GRU para Recife em 12/12", "qual o mais caro?"], tem: /Azul/, cita: [barato("GRU", "REC", "2026-12-12")] },
 	{ nome: "novo-tres-mais-baratos", msgs: ["voos de GRU para JFK em 12/12", "me mostra os 3 mais baratos"], tem: /Delta[\s\S]*United[\s\S]*American/ },
-	{ nome: "novo-mais-rapido-muitos", msgs: ["voos de GRU para JFK em 12/12", "qual é o mais rápido?"], tem: /Delta/, cita: [barato("GRU", "JFK", "2026-12-12")] },
-	{ nome: "novo-executiva-teto", msgs: ["GRU para LIS em 12/12 na executiva", "quais ficam até R$ 6000?"], tem: /LATAM/, naoTem: /TAP|Azul|Air Europa/ },
-	{ nome: "novo-sem-voos-origem", msgs: ["voos de Congonhas para Recife em 12/12"], tem: /nenhum|n[ãa]o (h[áa]|encontr|achei|tem)/i, semPreco: true },
+	{ nome: "novo-mais-rapido-muitos", msgs: ["voos de GRU para JFK em 12/12", "qual é o mais rápido?"], tem: /Delta/ },
+	{ nome: "novo-executiva-teto", msgs: ["GRU para LIS em 12/12 na executiva", "quais ficam até R$ 6000?"], tem: /LATAM/, naoTem: /(^|\n)[^\n]*(TAP|Azul|Air Europa)[^\n]*R\$/ },
+	{ nome: "novo-sem-voos-origem", msgs: ["voos de Congonhas para Recife em 12/12"], tem: /nenhum|n[ãa]o (h[áa]|foram encontr|encontr|achei|tem)/i, semPreco: true },
 	{ nome: "novo-troca-de-assunto", msgs: [PEDIDO, "qual a capital da Espanha?", "e o mais barato daqueles voos, qual era?"], cita: [LATAM] },
 ];

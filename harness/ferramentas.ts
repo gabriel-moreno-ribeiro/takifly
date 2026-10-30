@@ -6,6 +6,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
+import { apagarPreferencia, cancelarMonitoramento, criarMonitoramento, guardarPreferencia, listarMonitoramentos, listarPreferencias, type Monitoramento } from "./dados.ts";
 import { criarPlanilha, horas } from "../planilha.ts";
 import { buscarVoos, precoEquivalente, type Voo } from "../voos.ts";
 
@@ -20,6 +21,7 @@ export type Caderno = {
 	novos: Voo[];                // o que ainda não foi para uma planilha
 	buscas: string[];            // as buscas feitas neste pedido
 	textosDoUsuario: string[];   // o que a pessoa escreveu: serve para conferir se a data foi mesmo dita
+	conversa: string;            // de quem são os monitoramentos e as preferências
 };
 
 function cadernoDe(config: any): Caderno {
@@ -119,7 +121,7 @@ function trocarNumeros(texto: string) {
 
 // "12 de dezembro", "12. Dezember", "December 12, 2026"
 function dataComNomeDoMes(limpo: string, hoje: string) {
-	const diaPrimeiro = [...limpo.matchAll(/\b(\d{1,2})(?:\.|st|nd|rd|th)?\s+(?:de\s+|del\s+|of\s+)?([a-z]+)(?:\s+(?:de\s+|del\s+)?(\d{4}))?/g)].map((a) => ({ dia: a[1], nome: a[2], ano: a[3] }));
+	const diaPrimeiro = [...limpo.matchAll(/\b(\d{1,2})(?:\.|º|°|o|st|nd|rd|th)?\s+(?:de\s+|del\s+|of\s+)?([a-z]+)(?:\s+(?:de\s+|del\s+)?(\d{4}))?/g)].map((a) => ({ dia: a[1], nome: a[2], ano: a[3] }));
 	const mesPrimeiro = [...limpo.matchAll(/\b([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4}))?/g)].map((a) => ({ dia: a[2], nome: a[1], ano: a[3] }));
 	for (const { dia, nome, ano } of [...diaPrimeiro, ...mesPrimeiro]) {
 		const mes = MESES.findIndex((nomes) => nomes.includes(nome)) + 1;
@@ -494,15 +496,173 @@ const diferencaDeDuracao = tool(
 	},
 );
 
-// ---------- O CARDÁPIO ----------
-// quanto menos opções, menos um modelo fraco se confunde: sem voos na memória, as de análise nem aparecem
-const paraBuscar = [buscarVoosFerramenta, buscarVariosDias, buscarAeroportos, entenderDataFerramenta, calcular];
-const paraAnalisar = [filtrarVoos, melhoresVoos, combinarIdaEVolta, diferencaDeDuracao, listarPesquisas];
-export const todasAsFerramentas = [...paraBuscar, ...paraAnalisar];
-
-export function ferramentasDaEtapa(temVoos: boolean) {
-	return temVoos ? todasAsFerramentas : paraBuscar;
+// ---------- PREÇO DE UM MONITORAMENTO ----------
+// o preço mais barato de um trecho em todos os aeroportos. Só é erro se todas as buscas falharem.
+async function maisBaratoDoTrecho(origens: string[], destinos: string[], data: string, adultos: number, criancas: number, classe: string) {
+	let melhor: Voo | null = null;
+	let certas = 0;
+	let ultimoErro: Error | null = null;
+	for (const origem of origens) {
+		for (const destino of destinos) {
+			try {
+				const voos = await servicos.buscarVoos(origem, destino, data, adultos, criancas, classe);
+				certas++;
+				for (const voo of voos) if (!melhor || voo.preco < melhor.preco) melhor = voo;
+			} catch (erro: any) {
+				ultimoErro = erro;
+			}
+		}
+	}
+	if (certas === 0 && ultimoErro) throw ultimoErro;
+	return melhor;
 }
+
+type TrechosDoMonitoramento = Pick<Monitoramento, "origens" | "destinos" | "data" | "data_volta" | "adultos" | "criancas" | "classe">;
+
+// null quer dizer que não há voos; o erro quer dizer que não deu para saber
+export async function precoAtual(m: TrechosDoMonitoramento) {
+	const origens = m.origens.split(",");
+	const destinos = m.destinos.split(",");
+	const ida = await maisBaratoDoTrecho(origens, destinos, m.data, m.adultos, m.criancas, m.classe);
+	const volta = m.data_volta ? await maisBaratoDoTrecho(destinos, origens, m.data_volta, m.adultos, m.criancas, m.classe) : null;
+	if (!ida || (m.data_volta && !volta)) return null;
+	return { total: ida.preco + (volta?.preco ?? 0), ida, volta };
+}
+
+export function descreverMonitoramento(m: TrechosDoMonitoramento) {
+	const volta = m.data_volta ? `, volta em ${m.data_volta}` : "";
+	return `${m.origens}→${m.destinos} em ${m.data}${volta}, ${m.adultos + m.criancas} passageiro(s), ${m.classe}`;
+}
+
+// ---------- FERRAMENTAS DE MONITORAMENTO ----------
+const LIMITE_DE_MONITORAMENTOS = 10;    // cada um vira buscas no Google várias vezes por dia
+
+const criarMonitoramentoFerramenta = tool(
+	async ({ origem, destino, data, data_volta, preco_alvo, adultos, criancas, classe }, config) => {
+		const caderno = cadernoDe(config);
+		if (listarMonitoramentos(caderno.conversa).length >= LIMITE_DE_MONITORAMENTOS) throw new Error(`o limite é de ${LIMITE_DE_MONITORAMENTOS} monitoramentos. Avise e peça para cancelar algum.`);
+
+		const dia = conferirData(caderno, data);
+		const diaDaVolta = data_volta ? conferirData(caderno, data_volta) : null;
+		if (diaDaVolta && diaDaVolta < dia) throw new Error("a volta é antes da ida. Avise e pergunte as datas certas.");
+		const trechos = {
+			origens: conferirLugar(caderno, origem).join(","),
+			destinos: conferirLugar(caderno, destino).join(","),
+			data: dia,
+			data_volta: diaDaVolta,
+			adultos,
+			criancas,
+			classe: entenderClasse(classe),
+		};
+		if (trechos.origens.split(",").some((codigo) => trechos.destinos.split(",").includes(codigo))) throw new Error("a origem e o destino são o mesmo lugar. Avise e pergunte o destino certo.");
+
+		// a primeira checagem acontece agora: confere se a rota existe e já mostra o preço de hoje
+		const preco = await precoAtual(trechos);
+		const alvo = preco_alvo || null;
+		const jaEstaBom = preco !== null && alvo !== null && preco.total <= alvo;
+		const id = criarMonitoramento({
+			...trechos,
+			conversa: caderno.conversa,
+			preco_alvo: alvo,
+			menor_preco: preco?.total ?? null,
+			avisado_preco: jaEstaBom ? preco.total : null,    // o aviso é esta própria resposta
+			checado_em: Date.now(),
+		});
+
+		const hoje = preco ? `Preço de agora: R$ ${preco.total}.` : "Agora não há voos nessa rota.";
+		const regra = alvo !== null ? `Aviso quando ficar em R$ ${alvo} ou menos.` : "Aviso quando aparecer o menor preço até agora.";
+		const comprar = preco ? `\nComprar: ${[preco.ida.link, preco.volta?.link].filter(Boolean).join(" e ")}` : "";
+		return `Monitoramento #${id} criado: ${descreverMonitoramento(trechos)}. ${hoje} ${jaEstaBom ? "Já está no preço que o usuário quer." : regra} Confere a cada 6 horas, enquanto o bot estiver ligado.${comprar}`;
+	},
+	{
+		name: "criar_monitoramento",
+		description: "Passa a conferir o preço de uma viagem de tempos em tempos e avisa no Slack quando baixar.",
+		schema: z.object({
+			origem: z.string().describe("Cidade ou código do aeroporto"),
+			destino: z.string().describe("Cidade ou código do aeroporto"),
+			data: z.string().describe("A data de ida como veio no pedido"),
+			data_volta: z.string().optional().describe("A data de volta como veio no pedido. Sem volta, deixe de fora."),
+			preco_alvo: z.coerce.number().optional().describe("O valor total que o usuário quer pagar. Se não disser, deixe de fora."),
+			...passageiros,
+		}),
+	},
+);
+
+const listarMonitoramentosFerramenta = tool(
+	async (_args, config) => {
+		const lista = listarMonitoramentos(cadernoDe(config).conversa);
+		if (lista.length === 0) return "Nenhum monitoramento ativo.";
+		return lista.map((m) => `#${m.id}: ${descreverMonitoramento(m)}${m.preco_alvo ? `, alvo R$ ${m.preco_alvo}` : ""}${m.menor_preco ? `, menor preço visto R$ ${m.menor_preco}` : ""}`).join("\n");
+	},
+	{
+		name: "listar_monitoramentos",
+		description: "Mostra os monitoramentos ativos e o número de cada um.",
+		schema: z.object({}),
+	},
+);
+
+const cancelarMonitoramentoFerramenta = tool(
+	async ({ numero }, config) => {
+		if (!cancelarMonitoramento(cadernoDe(config).conversa, numero)) throw new Error(`não existe monitoramento ativo #${numero}. Use listar_monitoramentos.`);
+		return `Monitoramento #${numero} cancelado.`;
+	},
+	{
+		name: "cancelar_monitoramento",
+		description: "Cancela um monitoramento pelo número dele.",
+		schema: z.object({ numero: z.coerce.number().int() }),
+	},
+);
+
+// ---------- FERRAMENTAS DE PREFERÊNCIAS ----------
+const LIMITE_DE_PREFERENCIAS = 20;
+
+const lembrarPreferencia = tool(
+	async ({ texto }, config) => {
+		const { conversa } = cadernoDe(config);
+		if (listarPreferencias(conversa).length >= LIMITE_DE_PREFERENCIAS) throw new Error("já há muitas preferências guardadas. Avise e peça para apagar alguma.");
+		// um preço guardado aqui viraria "fato" nas próximas conversas
+		if (/\d\s*reais|R\$/i.test(texto)) throw new Error("preferências não guardam preços. Avise que isso não foi guardado.");
+		guardarPreferencia(conversa, texto.slice(0, 200));
+		return `Guardado: ${texto.slice(0, 200)}`;
+	},
+	{
+		name: "lembrar_preferencia",
+		description: "Guarda uma preferência do usuário, como onde mora ou que prefere voo direto.",
+		schema: z.object({ texto: z.string().describe("A preferência em uma frase curta") }),
+	},
+);
+
+const verPreferencias = tool(
+	async (_args, config) => {
+		const lista = listarPreferencias(cadernoDe(config).conversa);
+		return lista.map((preferencia) => `#${preferencia.id}: ${preferencia.texto}`).join("\n") || "Nenhuma preferência guardada.";
+	},
+	{
+		name: "ver_preferencias",
+		description: "Mostra as preferências guardadas e o número de cada uma.",
+		schema: z.object({}),
+	},
+);
+
+const esquecerPreferencia = tool(
+	async ({ numero }, config) => {
+		if (!apagarPreferencia(cadernoDe(config).conversa, numero)) throw new Error(`não existe preferência #${numero}. Use ver_preferencias.`);
+		return `Preferência #${numero} apagada.`;
+	},
+	{
+		name: "esquecer_preferencia",
+		description: "Apaga uma preferência pelo número dela.",
+		schema: z.object({ numero: z.coerce.number().int() }),
+	},
+);
+
+// ---------- O CARDÁPIO ----------
+// cada grupo pertence a um agente só (agentes.ts): quanto menos opções, menos um modelo fraco se confunde
+export const paraPesquisar = [buscarVoosFerramenta, buscarVariosDias, buscarAeroportos, entenderDataFerramenta];
+export const paraAnalisar = [filtrarVoos, melhoresVoos, combinarIdaEVolta, calcular, diferencaDeDuracao, listarPesquisas];
+export const paraMonitorar = [criarMonitoramentoFerramenta, listarMonitoramentosFerramenta, cancelarMonitoramentoFerramenta];
+export const paraLembrar = [lembrarPreferencia, verPreferencias, esquecerPreferencia];
+export const todasAsFerramentas = [...paraPesquisar, ...paraAnalisar, ...paraMonitorar, ...paraLembrar];
 
 // modelos fracos mandam null ou "" nos campos opcionais; para o código isso é o mesmo que não mandar
 export function limparArgumentos(args: Record<string, any>) {

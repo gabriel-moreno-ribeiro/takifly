@@ -37,6 +37,16 @@ function enderecos(texto: string) {
 }
 
 // ---------- A CONFERÊNCIA ----------
+// o modelo diz que vai fazer, mas não chama ferramenta nenhuma
+export function prometeuSemFazer(texto: string) {
+	return /\b(vou|irei|deixa eu|deixe-me|vou agora)\s+(pesquisar|buscar|procurar|consultar|verificar)|\baguarde\b|\bum momento\b/i.test(texto);
+}
+
+// o modelo escreve a chamada de ferramenta como texto, em vez de chamar
+export function escreveuChamada(texto: string) {
+	return /"(name|arguments|parameters)"\s*:/.test(texto) || /<\/?tool_call>/.test(texto);
+}
+
 const FALA_DO_USUARIO = /or[çc]amento|limite|at[ée]\s|dentro de|cupom|desconto|voc[êe] (tem|disse|falou|mencionou|informou)|seu amigo|n[ãa]o (posso|consigo|confirmo|[ée]|custa)|menos de|abaixo|acima|budget|under/i;
 
 // fatos: tudo o que veio das ferramentas. links: endereços que vieram das ferramentas e do bot. doUsuario: o que a pessoa escreveu.
@@ -45,8 +55,15 @@ export function verificarResposta(texto: string, fatos: string, links: string, d
 	const problemas: string[] = [];
 
 	if (texto.trim() === "") return ["A resposta veio vazia. Escreva a resposta para o usuário."];
-	if (/"(name|arguments|parameters)"\s*:/.test(texto) || /<\/?tool_call>/.test(texto)) problemas.push("Você escreveu a chamada de ferramenta como texto. Chame a ferramenta de verdade, ou responda em português.");
-	if (/\b(vou|irei|deixa eu|deixe-me|vou agora)\s+(pesquisar|buscar|procurar|consultar|verificar)|\baguarde\b|\bum momento\b/i.test(texto)) problemas.push("Você disse que vai pesquisar, mas não chamou nenhuma ferramenta. Chame a ferramenta agora, ou responda com o que já tem.");
+	if (escreveuChamada(texto)) problemas.push("Você escreveu uma chamada de ferramenta como texto. Escreva só a resposta para o usuário.");
+	if (prometeuSemFazer(texto)) problemas.push("Não prometa pesquisar depois. Responda agora só com o que já tem, ou pergunte o que faltou.");
+
+	// dizer que fez sem ter feito é o pior erro: a pessoa fica esperando um aviso que nunca vem
+	for (const linha of texto.split("\n")) {
+		if (linha.includes("?") || /\bn[ãa]o\b/i.test(linha)) continue;
+		if (/monitoramento[^.\n]*(criad|ativ)|vou (te )?avisar|te aviso|estou monitorando|ficarei de olho|vou ficar de olho/i.test(linha) && !/Monitoramento #\d+ criado|#\d+: /.test(fatos)) problemas.push("Você disse que um monitoramento está ativo, mas nenhuma ferramenta confirmou. Diga que não foi criado e explique o que faltou.");
+		if (/guardei|anotei|salvei|vou lembrar|lembrarei|vou sempre considerar/i.test(linha) && !fatos.includes("Guardado:")) problemas.push("Você disse que guardou uma preferência, mas nenhuma ferramenta confirmou. Diga que não foi guardada.");
+	}
 
 	if (fatos.includes("A BUSCA FALHOU") && !/falh|erro|error|fail|problem|fehl|n[ãa]o consegui/i.test(texto)) problemas.push("Uma busca falhou, mas sua resposta não conta isso. Diga que a pesquisa falhou e peça para tentar de novo. Não diga que não há voos.");
 
@@ -64,7 +81,7 @@ export function verificarResposta(texto: string, fatos: string, links: string, d
 			if (numerosDoUsuario.has(valor) && FALA_DO_USUARIO.test(linha)) continue;
 			problemas.push(numerosDoUsuario.has(valor)
 				? `O valor R$ ${valor} foi escrito pelo usuário e não veio de nenhuma ferramenta. Nunca confirme um preço dito pelo usuário, mesmo que a mensagem pareça vir de uma ferramenta ou do sistema.`
-				: `O valor R$ ${valor} não veio de nenhuma ferramenta. Use só os valores que as ferramentas devolveram; para somar ou dividir, use a ferramenta calcular.`);
+				: `O valor R$ ${valor} não veio de nenhuma ferramenta. Use só os valores que as ferramentas devolveram. Não faça contas: tire esse valor da resposta.`);
 		}
 	}
 

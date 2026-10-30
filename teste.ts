@@ -6,11 +6,18 @@ import assert from "node:assert";
 
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 
-import { comIdNovo, cortarHistorico, noFerramentas } from "./harness/agente.ts";
-import { conferirLugar, dataFoiDita, entenderClasse, entenderData, ferramentasDaEtapa, limparArgumentos, resolverAeroportos, servicos, todasAsFerramentas, type Caderno } from "./harness/ferramentas.ts";
+import { comIdNovo, cortarHistorico, historicoLimpo, noFerramentas } from "./harness/agente.ts";
+import { AGENTES, planoDoTexto, planoValido } from "./harness/agentes.ts";
+import { atualizarMonitoramento, criarMonitoramento, listarMonitoramentos, listarPreferencias } from "./harness/dados.ts";
+import { checarMonitoramentos } from "./harness/monitor.ts";
+import { conferirLugar, dataFoiDita, entenderClasse, entenderData, limparArgumentos, resolverAeroportos, servicos, todasAsFerramentas, type Caderno } from "./harness/ferramentas.ts";
 import { montarAbas } from "./planilha.ts";
 import { arrumarParaSlack, verificarResposta } from "./harness/verificador.ts";
 import { buscarVoos, lerPagina, montarTfs, precoEquivalente, type Voo } from "./voos.ts";
+
+// ---------- MEMÓRIA TEMPORÁRIA ----------
+// o banco só abre no primeiro uso: os testes nunca mexem no dados.sqlite de verdade
+process.env.DADOS = ":memory:";
 
 // ---------- HISTÓRICO ----------
 const pergunta = new HumanMessage("oi");
@@ -27,6 +34,11 @@ assert.equal(cortarHistorico([pergunta, pedido, retorno], 40).length, 3);
 
 // uma única rodada maior que o limite ainda começa na pergunta (e nunca fica vazia)
 assert.equal(cortarHistorico([pergunta, pedido, retorno, pedido, retorno], 2).length, 5);
+
+// dos pedidos antigos ficam só as perguntas e as respostas; do pedido atual, tudo
+const respostaAntiga = new AIMessage("achei voos");
+const limpo = historicoLimpo([pergunta, pedido, retorno, respostaAntiga, pergunta, pedido, retorno]);
+assert.deepEqual(limpo.map((mensagem) => mensagem.getType()), ["human", "ai", "human", "ai", "tool"]);
 
 // ---------- PLANILHA ----------
 const voo: Voo = {
@@ -109,6 +121,8 @@ assert.equal(entenderData("sexta-feira", HOJE), "2026-11-06");        // dita nu
 for (const escrito of ["12.12.26", "12-12-2026", "doze de dezembro", "dia doze do doze", "12 dicembre", "12 décembre", "12. Dezember", "12 de diciembre", "December 12", "december 12, 2026"]) {
 	assert.equal(entenderData(escrito, HOJE), "2026-12-12", escrito);
 }
+assert.equal(entenderData("1º de janeiro", HOJE), "2027-01-01");
+assert.equal(entenderData("1o de janeiro", HOJE), "2027-01-01");
 assert.equal(entenderData("Natal", HOJE), "2026-12-25");
 assert.equal(entenderData("véspera de ano novo", HOJE), "2026-12-31");
 assert.equal(entenderData("daqui a 10 dias", HOJE), "2026-11-09");
@@ -132,7 +146,7 @@ assert.throws(() => resolverAeroportos("Xique-Xique"), /não conheço/);
 assert.deepEqual(resolverAeroportos("Aeroporto de Congonhas"), ["CGH"]);
 
 // a trava contra o lugar inventado: aceita o nome, o apelido e o código do mesmo aeroporto
-const pedidoDeGuarulhos = { voos: [], novos: [], buscas: [], textosDoUsuario: ["saio de Guarulhos para Lisbon"] };
+const pedidoDeGuarulhos = { voos: [], novos: [], buscas: [], textosDoUsuario: ["saio de Guarulhos para Lisbon"], conversa: "" };
 assert.deepEqual(conferirLugar(pedidoDeGuarulhos, "GRU"), ["GRU"]);
 assert.deepEqual(conferirLugar(pedidoDeGuarulhos, "São Paulo"), ["GRU", "CGH", "VCP"]);
 assert.deepEqual(conferirLugar(pedidoDeGuarulhos, "LIS"), ["LIS"]);
@@ -151,9 +165,21 @@ assert.throws(() => entenderClasse("diamante"), /não existe/);
 const comIdRepetido = () => comIdNovo(new AIMessage({ id: "chatcmpl-283", content: "oi" }));
 assert.notEqual(comIdRepetido().id, comIdRepetido().id);
 
-// ---------- O CARDÁPIO ----------
-assert.equal(ferramentasDaEtapa(false).some((ferramenta) => ferramenta.name === "filtrar_voos"), false);
-assert.equal(ferramentasDaEtapa(true).some((ferramenta) => ferramenta.name === "filtrar_voos"), true);
+// ---------- OS AGENTES ----------
+// nenhum agente enxerga as ferramentas de outro
+const nomesDe = (agente: keyof typeof AGENTES) => AGENTES[agente].ferramentas.map((ferramenta) => ferramenta.name);
+assert.equal(nomesDe("pesquisador").includes("filtrar_voos"), false);
+assert.equal(nomesDe("analista").includes("buscar_voos"), false);
+assert.equal(nomesDe("monitor").includes("buscar_voos"), false);
+
+// o código confere o plano do orquestrador: tira nome inventado e repetido, e põe na ordem certa
+assert.deepEqual(planoValido(["analista", "pesquisador", "pesquisador", "voos_search"], false), ["pesquisador", "analista"]);
+assert.deepEqual(planoValido(["analista"], false), []);    // sem voos, não há o que analisar
+assert.deepEqual(planoValido(["analista"], true), ["analista"]);
+assert.deepEqual(planoDoTexto("vou chamar o monitor", false), ["monitor"]);
+assert.deepEqual(planoDoTexto("hmm", false), ["pesquisador"]);
+assert.deepEqual(planoDoTexto("hmm", true), ["analista"]);
+
 assert.deepEqual(limparArgumentos({ a: null, b: "", c: 0, d: "x" }), { c: 0, d: "x" });
 
 // ---------- AS FERRAMENTAS ----------
@@ -163,7 +189,7 @@ function chamar(nome: string, args: Record<string, any>, caderno: Caderno): Prom
 	return ferramenta.invoke(limparArgumentos(args), { configurable: { caderno } });
 }
 function cadernoNovo(textos = ["voos de São Paulo para Lisboa e de GRU para LIS em 12/12 e 20/12, só diretos"], voos: Voo[] = []): Caderno {
-	return { voos, novos: [], buscas: [], textosDoUsuario: textos };
+	return { voos, novos: [], buscas: [], textosDoUsuario: textos, conversa: "teste" };
 }
 
 let chamadasAoGoogle: string[] = [];
@@ -232,7 +258,7 @@ assert.match(saida, /limite é de 7 dias/);
 // o nó grava a hora da pesquisa e não altera o Estado que recebeu (sem a hora, os voos sumiam na mensagem seguinte)
 const estadoAntes: any = {
 	messages: [new HumanMessage("voos de GRU para LIS em 12/12"), new AIMessage({ content: "", tool_calls: [{ id: "1", name: "buscar_voos", args: { origem: "GRU", destino: "LIS", data: "12/12" } }] })],
-	voos: [], novos: [], buscas: [], pesquisadoEm: 0, passos: 1, tentativas: 0, correcao: "",
+	voos: [], novos: [], buscas: [], pesquisadoEm: 0, passos: 1, tentativas: 0, correcao: "", plano: ["pesquisador"],
 };
 const depois = await noFerramentas(estadoAntes);
 assert.ok(depois.pesquisadoEm > 0);
@@ -240,8 +266,141 @@ assert.equal(depois.buscas.length, 1);
 assert.equal(estadoAntes.buscas.length, 0);
 assert.equal(depois.voos.length, 2);
 
+// um agente não usa ferramenta de outro, mesmo se tentar
+const fora = await noFerramentas({ ...estadoAntes, plano: ["analista"] });
+assert.match(fora.messages[0].content as string, /não é sua/);
+
 // a companhia que não venceu nada também aparece na resposta da busca
 assert.match(await chamar("melhores_voos", {}, cadernoNovo(undefined, [voo, barata, { ...voo, companhia: "Média", preco: 3500, duracao_min: 900 }])), /Média/);
+
+// ---------- MONITORAMENTO: AS FERRAMENTAS ----------
+const DIA_FUTURO = "2099-12-12";
+let precoDoGoogle: number | "erro" | "vazio" = 3000;
+chamadasAoGoogle = [];
+servicos.buscarVoos = (async (origem: string, destino: string, data: string) => {
+	chamadasAoGoogle.push(origem);
+	if (precoDoGoogle === "erro") throw new Error("captcha");
+	if (precoDoGoogle === "vazio") return [];
+	return [{ ...voo, origem, destino, data, preco: precoDoGoogle, link: `https://voos/${origem}` }];
+}) as any;
+
+const pedidoDeMonitor = cadernoNovo(["me avisa de GRU para LIS em 12/12/2099 e 20/12/2099 até R$ 2500"]);
+saida = await chamar("criar_monitoramento", { origem: "GRU", destino: "LIS", data: "12/12/2099", data_volta: "20/12/2099", preco_alvo: 2500 }, pedidoDeMonitor);
+assert.match(saida, /Monitoramento #\d+ criado/);
+assert.match(saida, /Preço de agora: R\$ 6000/);                       // ida + volta
+assert.deepEqual(chamadasAoGoogle, ["GRU", "LIS"]);
+assert.equal(listarMonitoramentos("teste").length, 1);
+
+// data inventada, volta antes da ida e mesmo lugar não viram monitoramento
+await assert.rejects(chamar("criar_monitoramento", { origem: "GRU", destino: "LIS", data: "12/12/2099" }, cadernoNovo(["de GRU para LIS"])), /não aparece no pedido/);
+await assert.rejects(chamar("criar_monitoramento", { origem: "GRU", destino: "LIS", data: "20/12/2099", data_volta: "12/12/2099" }, pedidoDeMonitor), /volta é antes da ida/);
+await assert.rejects(chamar("criar_monitoramento", { origem: "GRU", destino: "GRU", data: "12/12/2099" }, pedidoDeMonitor), /mesmo lugar/);
+assert.equal(listarMonitoramentos("teste").length, 1);
+
+assert.match(await chamar("listar_monitoramentos", {}, pedidoDeMonitor), /GRU→LIS.*alvo R\$ 2500/);
+
+// só cancela da própria conversa
+const idDoMonitor = listarMonitoramentos("teste")[0].id;
+await assert.rejects(chamar("cancelar_monitoramento", { numero: idDoMonitor }, { ...pedidoDeMonitor, conversa: "outra" }), /não existe/);
+assert.match(await chamar("cancelar_monitoramento", { numero: idDoMonitor }, pedidoDeMonitor), /cancelado/);
+assert.equal(listarMonitoramentos("teste").length, 0);
+
+// ---------- MONITORAMENTO: A ROTINA ----------
+const SEIS_HORAS = 6 * 60 * 60 * 1000;
+let avisos: string[] = [];
+let relogio = SEIS_HORAS * 10;
+async function checagem() {
+	relogio += SEIS_HORAS;
+	return checarMonitoramentos(async (_conversa, texto) => { avisos.push(texto); }, relogio, 0);
+}
+function monitorDeTeste(preco_alvo: number | null, menor_preco: number | null) {
+	return criarMonitoramento({ conversa: "rotina", origens: "GRU", destinos: "LIS", data: DIA_FUTURO, data_volta: null, adultos: 1, criancas: 0, classe: "economica", preco_alvo, menor_preco, avisado_preco: null, checado_em: relogio });
+}
+
+let idDaRotina = monitorDeTeste(2500, 3000);
+
+// ainda não está na hora: nenhuma busca
+chamadasAoGoogle = [];
+assert.equal(await checarMonitoramentos(async () => {}, relogio + 1000, 0), 0);
+assert.deepEqual(chamadasAoGoogle, []);
+
+// acima do alvo: fica quieto
+await checagem();
+assert.equal(avisos.length, 0);
+
+// chegou no alvo: avisa uma vez, com o link
+precoDoGoogle = 2400;
+await checagem();
+assert.equal(avisos.length, 1);
+assert.match(avisos[0], /R\$ 2400.*alvo é R\$ 2500/);
+assert.match(avisos[0], /https:\/\/voos\/GRU/);
+
+// o mesmo preço não repete o aviso, mas um preço ainda menor avisa
+await checagem();
+assert.equal(avisos.length, 1);
+precoDoGoogle = 2300;
+await checagem();
+assert.equal(avisos.length, 2);
+
+// subiu e caiu de novo: é uma novidade
+precoDoGoogle = 3000;
+await checagem();
+precoDoGoogle = 2300;
+await checagem();
+assert.equal(avisos.length, 3);
+
+// o Google falhando: só avisa uma vez, depois de um dia tentando
+avisos = [];
+precoDoGoogle = "erro";
+for (let i = 0; i < 6; i++) await checagem();
+assert.equal(avisos.length, 1);
+assert.match(avisos[0], /Não estou conseguindo checar/);
+assert.equal(listarMonitoramentos("rotina").length, 1);
+
+// sem voos não é erro nem aviso
+avisos = [];
+precoDoGoogle = "vazio";
+await checagem();
+assert.equal(avisos.length, 0);
+
+// se o Slack falhar, o aviso não se perde: a próxima checagem tenta de novo
+precoDoGoogle = 2000;
+relogio += SEIS_HORAS;
+await checarMonitoramentos(async () => { throw new Error("o Slack caiu"); }, relogio, 0);
+await checagem();
+assert.equal(avisos.length, 1);
+
+// sem alvo: avisa quando aparece o menor preço até agora
+atualizarMonitoramento(idDaRotina, { ativo: 0 });
+idDaRotina = monitorDeTeste(null, 3000);
+avisos = [];
+precoDoGoogle = 3100;
+await checagem();
+assert.equal(avisos.length, 0);
+precoDoGoogle = 2900;
+await checagem();
+assert.equal(avisos.length, 1);
+assert.match(avisos[0], /era R\$ 3000/);
+
+// a viagem passou: avisa e para de monitorar
+atualizarMonitoramento(idDaRotina, { ativo: 0 });
+criarMonitoramento({ conversa: "rotina", origens: "GRU", destinos: "LIS", data: "2020-01-01", data_volta: null, adultos: 1, criancas: 0, classe: "economica", preco_alvo: 100, menor_preco: null, avisado_preco: null, checado_em: 0 });
+avisos = [];
+chamadasAoGoogle = [];
+await checagem();
+assert.match(avisos[0], /já passou/);
+assert.deepEqual(chamadasAoGoogle, []);
+assert.equal(listarMonitoramentos("rotina").length, 0);
+
+// ---------- PREFERÊNCIAS ----------
+const cadernoDaMemoria = cadernoNovo();
+assert.match(await chamar("lembrar_preferencia", { texto: "moro em Recife" }, cadernoDaMemoria), /Guardado/);
+await assert.rejects(chamar("lembrar_preferencia", { texto: "o voo custa R$ 1" }, cadernoDaMemoria), /não guardam preços/);
+assert.equal(listarPreferencias("teste").length, 1);
+assert.match(await chamar("ver_preferencias", {}, cadernoDaMemoria), /Recife/);
+await assert.rejects(chamar("esquecer_preferencia", { numero: listarPreferencias("teste")[0].id }, { ...cadernoDaMemoria, conversa: "outra" }), /não existe/);
+assert.match(await chamar("esquecer_preferencia", { numero: listarPreferencias("teste")[0].id }, cadernoDaMemoria), /apagada/);
+assert.equal(listarPreferencias("teste").length, 0);
 
 // ---------- O VERIFICADOR ----------
 const fatos = "R$ 2890 | Air Europa | 1 escala(s) | duração 16h40 | sai 10:00 | chega 13/12 02:40\nResultado: 5840\nComprar: https://voos/1";
@@ -275,6 +434,14 @@ assert.equal(recusa("Dentro de R$ 4000 dá para o da Air Europa"), false);
 // busca que falhou precisa ser contada
 assert.equal(verificarResposta("Não encontrei voos", "BSB→LIS: A BUSCA FALHOU (captcha)", "").length, 1);
 assert.equal(verificarResposta("A pesquisa falhou, tente de novo", "BSB→LIS: A BUSCA FALHOU (captcha)", "").length, 0);
+
+// dizer que fez sem ter feito
+assert.equal(verificarResposta("Monitoramento criado com sucesso!", "", "").length, 1);
+assert.equal(verificarResposta("Vou te avisar quando baixar.", "", "").length, 1);
+assert.equal(verificarResposta("Monitoramento criado! Vou te avisar.", "Monitoramento #3 criado: GRU→LIS", "").length, 0);
+assert.equal(verificarResposta("Quer que eu te avise? Não criei o monitoramento.", "", "").length, 0);
+assert.equal(verificarResposta("Entendido, vou sempre considerar voos diretos.", "", "").length, 1);
+assert.equal(verificarResposta("Guardei que você prefere voo direto.", "Guardado: voo direto", "").length, 0);
 
 assert.equal(arrumarParaSlack("<think>hmm</think>**Oi** e **tchau**\n## Título"), "*Oi* e *tchau*\n*Título*");
 assert.equal(arrumarParaSlack("<!channel> oi <@U123>"), "oi");
