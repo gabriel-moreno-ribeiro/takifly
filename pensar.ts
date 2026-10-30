@@ -1,10 +1,18 @@
-// pensar.ts - passo 11: o "cérebro" do bot. Recebe a CONVERSA inteira, pergunta ao modelo e devolve a resposta.
+// pensar.ts - passo 12: o "cérebro" do bot. Recebe a conversa, junta as instruções, pergunta ao modelo e devolve a resposta.
 //
 // Este arquivo não roda sozinho: quem usa ele é o bot.ts (com o import { pensar } from "./pensar.ts").
 // A chave OLLAMA_API_KEY já foi lida do .env pelo bot.ts.
 
 // o formato de cada mensagem da conversa: quem falou ("user" = você, "assistant" = o bot) e o que falou
 export type Mensagem = { role: string; content: string };
+
+// ---------- PROMPT DE SISTEMA ----------
+// as regras do trabalho: vão no começo de TODA carta, antes da conversa
+const INSTRUCOES = `Você é o assistente de passagens aéreas do Gabriel, e conversa com ele pelo Slack.
+Responda curto e direto, no mesmo idioma em que ele escrever.
+Você ainda NÃO consegue pesquisar voos nem ver preços de verdade: nunca invente preços, horários ou companhias.
+Se ele pedir uma pesquisa, explique que essa função ainda está sendo construída.
+Para negrito, use *um asterisco de cada lado* (é o formato do Slack).`;
 
 // "export" deixa outros arquivos usarem esta função; "async" porque lá dentro esperamos a internet
 export async function pensar(conversa: Mensagem[]) {
@@ -18,7 +26,8 @@ export async function pensar(conversa: Mensagem[]) {
 		},
 		body: JSON.stringify({
 			model: "glm-5.3",
-			messages: conversa,    // mandamos TODAS as mensagens: é assim que o modelo "lembra"
+			// primeiro as instruções, depois TODAS as mensagens da conversa ("..." = "cada item de")
+			messages: [{ role: "system", content: INSTRUCOES }, ...conversa],
 		}),
 	});
 
