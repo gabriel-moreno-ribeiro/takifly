@@ -57,7 +57,7 @@ const ida = catalogo("GRU", "LIS", "2026-12-12");
 const companhias = BASE.map((voo) => voo.companhia);
 
 function numeroEmReais(texto: string) {
-	return Number(texto.replace(/\./g, "").replace(",", "."));
+	return Number(texto.replace(/[.\s]/g, "").replace(",", "."));
 }
 
 function horasEmMinutos(horas: string, minutos?: string) {
@@ -75,8 +75,8 @@ function fatosErrados(resposta: string) {
 		const nome = nomes[0];
 		const doVoo = precosDasBuscas.filter((voo) => voo.companhia === nome);
 
-		const precos = [...linha.matchAll(/R\$\s*([\d.,]*\d)/g)].map((achado) => numeroEmReais(achado[1]));
-		if (precos.length === 1 && !doVoo.some((voo) => voo.preco === precos[0]) && !/custo|benef|equivalente/i.test(linha)) problemas.push(`preço errado para ${nome}: ${linha}`);
+		const precos = [...linha.matchAll(/R\$\s*(\d[\d.,\s]*\d|\d)/g)].map((achado) => numeroEmReais(achado[1]));
+		if (precos.length === 1 && !doVoo.some((voo) => voo.preco === precos[0]) && !/custo|benef|equivalente|total|soma/i.test(linha)) problemas.push(`preço errado para ${nome}: ${linha}`);
 
 		const duracoes = [...linha.matchAll(/(\d{1,2})\s*h(?:oras?)?(?:\s*e)?\s*(\d{2})?(?:\s*min(?:utos)?)?\s*(?:de\s+)?(?:viagem|voo|dura)/gi)];
 		for (const achado of duracoes) {
@@ -88,7 +88,7 @@ function fatosErrados(resposta: string) {
 }
 
 function temValor(resposta: string, valor: number) {
-	const semPontos = resposta.replace(/(\d)\.(\d{3})/g, "$1$2");
+	const semPontos = resposta.replace(/(\d)[.\s](\d{3})/g, "$1$2");
 	return semPontos.includes(String(valor));
 }
 
