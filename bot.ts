@@ -1,4 +1,4 @@
-// bot.ts - passo 11: o bot conversa com o modelo e LEMBRA da conversa (enquanto estiver ligado)
+// bot.ts - os ouvidos e a boca do bot: recebe a mensagem no Slack, chama o grafo (agente.ts) e responde
 //
 // Como rodar (dentro da pasta passagens.ts/):   node bot.ts        (Ctrl+C para parar)
 
@@ -6,8 +6,8 @@
 // puxa da biblioteca do Slack, as 21929129120 milhoes de bibliotecas para a biblioteca do slack funcionar e puxa apenas o que eu quero dela que é a parte de APP, ou seja, o bot em si, para ele nao apenas conseguir se conectar com o slack mas tambem conversar com ele
 import { App } from "@slack/bolt";
 
-// puxa a função pensar do NOSSO arquivo pensar.ts (o "./" quer dizer "aqui nesta mesma pasta")
-import { pensar, type Mensagem } from "./pensar.ts";
+// puxa a função responder do NOSSO arquivo agente.ts (o "./" quer dizer "aqui nesta mesma pasta")
+import { responder } from "./agente.ts";
 
 // ---------- CHAVES ----------
 // lê o arquivo .env e guarda cada chave em process.env (depois esse process.env vai dar o valor da chave API em si ao process.env.SLACK_BOT_TOKEN
@@ -20,10 +20,19 @@ const app = new App({
 	socketMode: true,                      // o bot liga para o Slack, e não o contrário
 });
 
-// ---------- MEMÓRIA ----------
-// uma conversa por canal do Slack: a chave é o id do canal, o valor é a lista de mensagens daquele canal
-// shortcut: fica só na memória do programa (Ctrl+C apaga tudo); guardar em arquivo quando precisar sobreviver
-const conversas = new Map<string, Mensagem[]>();
+// ---------- ORDEM DAS MENSAGENS ----------
+// um pedido por vez em cada canal: dois ao mesmo tempo mexeriam na mesma conversa e bagunçariam a memória
+const filaDoCanal = new Map<string, Promise<void>>();
+
+function naFila(canal: string, trabalho: () => Promise<void>) {
+	const anterior = filaDoCanal.get(canal) ?? Promise.resolve();
+	const proximo = anterior.then(trabalho, trabalho);
+	filaDoCanal.set(canal, proximo);
+	return proximo;
+}
+
+// o Slack às vezes entrega a mesma mensagem duas vezes; o "ts" é o id único de cada mensagem
+const mensagensVistas = new Set<string>();
 
 // ---------- RESPONDER ----------
 // toda vez que chegar uma mensagem, o Slack chama esta função
@@ -33,19 +42,21 @@ app.message(async ({ message, say }) => {
 
 	const texto = message.text;
 	if (texto === undefined) return;    // mensagem só com foto ou arquivo: não tem texto para mandar ao modelo
+	if (mensagensVistas.has(message.ts)) return;
+	mensagensVistas.add(message.ts);
 	console.log("Chegou uma mensagem: " + texto);
 
-	// pega a conversa deste canal; se ainda não existe, começa uma lista vazia
-	const conversa = conversas.get(message.channel) ?? [];
-	conversa.push({ role: "user", content: texto });
-
-	const respostaDoModelo = await pensar(conversa);
-	console.log("O modelo respondeu: " + respostaDoModelo);
-	conversa.push({ role: "assistant", content: respostaDoModelo });
-	conversas.set(message.channel, conversa);
-
-	await say(respostaDoModelo);
-
+	await naFila(message.channel, async () => {
+		try {
+			// cada canal do Slack é uma conversa separada na memória
+			const resposta = await responder(message.channel, texto);
+			console.log("O bot respondeu: " + resposta);
+			await say(resposta);
+		} catch (erro: any) {
+			console.log("Deu erro: ", erro);
+			await say("Deu erro: " + erro.message + "\nPode mandar de novo daqui a pouco: eu continuo de onde parei.");
+		}
+	});
 });
 
 // ---------- LIGAR ----------
