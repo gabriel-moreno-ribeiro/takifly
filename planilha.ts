@@ -5,7 +5,7 @@
 
 import { precoEquivalente, type Voo } from "./voos.ts";
 
-function horas(minutos: number) {
+export function horas(minutos: number) {
 	// 1050 -> "17h30"
 	return Math.floor(minutos / 60) + "h" + String(minutos % 60).padStart(2, "0");
 }
