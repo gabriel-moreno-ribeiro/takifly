@@ -1,0 +1,8 @@
+{
+  "name": "passagens-ts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@slack/bolt": "5.1.0"
+  }
+}
