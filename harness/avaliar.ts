@@ -12,10 +12,9 @@
 // Cada resultado é salvo em harness/resultados/<modelo>.jsonl assim que sai. Rodar de novo pula o que já terminou.
 // Para ver a comparação entre os modelos:   node harness/comparar.ts
 
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 
-import { LangfuseClient } from "@langfuse/client";
-
+import { conferirPedido } from "../voos.ts";
 import { BASE, catalogo, type Cenario, cenarios, proximoDia } from "./cenarios.ts";
 
 // ---------- MEMÓRIA SEPARADA ----------
@@ -23,13 +22,14 @@ import { BASE, catalogo, type Cenario, cenarios, proximoDia } from "./cenarios.t
 process.env.MEMORIA = ":memory:";
 const { responder } = await import("./agente.ts");
 const { servicos } = await import("./ferramentas.ts");
-const { enviarRastreio } = await import("./rastreio.ts");
+const { anotar, enviarRastreio } = await import("./rastreio.ts");
 
 // ---------- OS SERVIÇOS DE MENTIRA ----------
 let buscas: any[] = [];
 let planilhas = 0;
 
 servicos.buscarVoos = async (origem: string, destino: string, data: string, adultos = 1, criancas = 0, classe = "economica") => {
+	conferirPedido(origem, destino, data, adultos, criancas, classe);    // as mesmas regras da busca de verdade
 	buscas.push({ origem, destino, data, adultos, criancas, classe });
 	if (data < "2026-01-01") throw new Error("essa data já passou");
 	if (origem === "BSB") throw new Error("o Google pediu captcha");    // a prova de quando o Google sai do ar
@@ -65,12 +65,16 @@ function fatosErrados(resposta: string) {
 		const doVoo = precosDasBuscas.filter((voo) => voo.companhia === nome);
 
 		const precos = [...linha.matchAll(/R\$\s*(\d[\d.,\s]*\d|\d)/g)].map((achado) => numeroEmReais(achado[1]));
-		if (precos.length === 1 && !doVoo.some((voo) => voo.preco === precos[0]) && !/custo|benef|equivalente|total|soma|a mais|diferen|ida e volta/i.test(linha)) problemas.push(`preço errado para ${nome}: ${linha}`);
+		// fora dessa faixa é uma soma ou uma diferença de preços, e não o preço de um voo
+		const faixa = doVoo.map((voo) => voo.preco);
+		const pareceOPreco = faixa.length === 0 || (precos[0] >= Math.min(...faixa) * 0.5 && precos[0] <= Math.max(...faixa) * 1.5);
+		if (precos.length === 1 && pareceOPreco && !doVoo.some((voo) => voo.preco === precos[0]) && !/custo|benef|equivalente|total|soma|a mais|diferen|ida e volta/i.test(linha)) problemas.push(`preço errado para ${nome}: ${linha}`);
 
 		const duracoes = [...linha.matchAll(/(\d{1,2})\s*h(?:oras?)?(?:\s*e)?\s*(\d{2})?(?:\s*min(?:utos)?)?\s*(?:de\s+)?(?:viagem|voo|dura)/gi)];
 		for (const achado of duracoes) {
 			const minutos = horasEmMinutos(achado[1], achado[2]);
-			if (!doVoo.some((voo) => voo.duracao_min === minutos)) problemas.push(`duração errada para ${nome}: ${linha}`);
+			// a linha pode comparar com outro voo ("em vez de 24h35"), então vale qualquer duração que exista
+			if (!precosDasBuscas.some((voo) => voo.duracao_min === minutos)) problemas.push(`duração errada para ${nome}: ${linha}`);
 		}
 	}
 	return problemas;
@@ -354,7 +358,7 @@ function juizDoCenario(c: Cenario) {
 			...(c.busca ?? []).flatMap((filtro) => exigir(fez(filtro), `não fez a busca ${JSON.stringify(filtro)}; fez ${JSON.stringify(buscas)}`)),
 			...(c.naoBusca ?? []).flatMap((filtro) => exigir(!fez(filtro), `fez uma busca proibida: ${JSON.stringify(filtro)}`)),
 			...(c.semBusca ? semBuscas() : []),
-			...(c.buscaOuPergunta ? exigir(c.buscaOuPergunta.every(fez) || r.ultima.includes("?"), `nem buscou nem perguntou: ${inicio}`) : []),
+			...(c.buscaOuPergunta ? exigir(c.buscaOuPergunta.every(fez) || /\?|informe|preciso|confirm/i.test(r.ultima), `nem buscou nem perguntou: ${inicio}`) : []),
 			...(c.cita ?? []).flatMap((valor) => citou(r.ultima, valor)),
 			...(c.tem ? exigir(c.tem.test(r.ultima), `faltou ${c.tem}: ${inicio}`) : []),
 			...(c.naoTem ? exigir(!c.naoTem.test(r.ultima), `não podia ter ${c.naoTem}: ${inicio}`) : []),
@@ -370,7 +374,7 @@ if (new Set(nomes).size !== nomes.length) throw new Error("há dois cenários co
 
 // ---------- RODAR A PROVA ----------
 const MODELO = process.env.MODELO ?? "glm-5.3";
-const PASTA = import.meta.dirname + "/resultados";
+const PASTA = process.env.RESULTADOS ?? import.meta.dirname + "/resultados";
 const ARQUIVO = `${PASTA}/${MODELO.replaceAll(":", "-")}.jsonl`;
 const TEMPO_MAXIMO = 8 * 60 * 1000;
 await mkdir(PASTA, { recursive: true });
@@ -382,8 +386,28 @@ const terminados = new Set(linhas.filter((linha) => !linha.erro).map((linha) => 
 const [parte, partes] = (process.env.PARTE ?? "1/1").split("/").map(Number);
 const filtro = process.argv[2] ?? "";
 const selecionados = todos.filter((caso, indice) => caso.nome.includes(filtro) && indice % partes === parte - 1 && !terminados.has(caso.nome));
-const langfuse = process.env.LANGFUSE_SECRET_KEY ? new LangfuseClient() : null;
 let aprovados = 0;
+
+// o modelo fraco usa espaços especiais e "Ibéria" com acento: para o juiz é tudo a mesma coisa
+function normalizar(texto: string) {
+	return texto.normalize("NFKC").replaceAll("Ibéria", "Iberia");
+}
+
+// ---------- JULGAR DE NOVO ----------
+// quando um juiz muda, as respostas guardadas são julgadas outra vez, sem gastar crédito.   REJULGAR=1 node harness/avaliar.ts
+if (process.env.REJULGAR) {
+	const novas = linhas.map((linha) => {
+		const caso = todos.find((opcao) => opcao.nome === linha.caso);
+		if (!caso || linha.erro) return linha;
+		buscas = linha.buscas;
+		const ultima = normalizar(linha.resposta);
+		const problemas = [...caso.juiz({ respostas: [ultima], ultima }), ...fatosErrados(ultima)];
+		return { ...linha, passou: problemas.length === 0, problemas };
+	});
+	await writeFile(ARQUIVO, novas.map((linha) => JSON.stringify(linha)).join("\n") + "\n");
+	console.log(`${MODELO}: ${novas.filter((linha) => linha.passou).length} de ${novas.length}`);
+	process.exit(0);
+}
 
 for (const caso of selecionados) {
 	buscas = [];
@@ -396,7 +420,7 @@ for (const caso of selecionados) {
 	try {
 		const conversar = async () => {
 			const respostas: string[] = [];
-			for (const mensagem of caso.mensagens) respostas.push(await responder(conversa, mensagem));
+			for (const mensagem of caso.mensagens) respostas.push(normalizar(await responder(conversa, mensagem)));
 			return respostas;
 		};
 		// shortcut: um cenário que estoura o tempo continua rodando por trás e pode somar buscas ao próximo; é raro, e esse próximo só teria a nota errada.
@@ -416,10 +440,9 @@ for (const caso of selecionados) {
 
 	await appendFile(ARQUIVO, JSON.stringify({ modelo: MODELO, caso: caso.nome, passou, erro, problemas, mensagens: caso.mensagens, resposta: ultima, buscas, segundos, conversa }) + "\n");
 	// a nota aparece na sessão do Langfuse: dá para filtrar só o que falhou
-	langfuse?.score.create({ sessionId: conversa, name: "passou", value: passou ? 1 : 0, dataType: "BOOLEAN", comment: problemas.join(" | ").slice(0, 500) });
+	anotar(conversa, "passou", passou, problemas.join(" | "));
 }
 
 console.log(`\nNota de ${MODELO}: ${aprovados} de ${selecionados.length}`);
-await langfuse?.flush();
 await enviarRastreio();
 process.exit(0);    // um cenário que estourou o tempo não pode segurar o programa aberto

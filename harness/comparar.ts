@@ -1,10 +1,12 @@
 // comparar.ts - lê resultados/*.jsonl e mostra a nota de cada modelo, por grupo e por cenário
 //
-// Como rodar (dentro da pasta passagens.ts/, a de cima):   node harness/comparar.ts
+// Como rodar (dentro da pasta passagens.ts/, a de cima):
+//   node harness/comparar.ts                              a rodada atual
+//   node harness/comparar.ts harness/resultados/rodada-1  uma rodada antiga
 
 import { readdir, readFile } from "node:fs/promises";
 
-const PASTA = import.meta.dirname + "/resultados";
+const PASTA = process.argv[2] ?? import.meta.dirname + "/resultados";
 
 // se um cenário rodou mais de uma vez, vale a última
 const notas = new Map<string, Map<string, any>>();

@@ -6,8 +6,8 @@ import assert from "node:assert";
 
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 
-import { cortarHistorico, noFerramentas } from "./harness/agente.ts";
-import { dataFoiDita, entenderData, ferramentasDaEtapa, limparArgumentos, resolverAeroportos, servicos, todasAsFerramentas, type Caderno } from "./harness/ferramentas.ts";
+import { comIdNovo, cortarHistorico, noFerramentas } from "./harness/agente.ts";
+import { conferirLugar, dataFoiDita, entenderClasse, entenderData, ferramentasDaEtapa, limparArgumentos, resolverAeroportos, servicos, todasAsFerramentas, type Caderno } from "./harness/ferramentas.ts";
 import { montarAbas } from "./planilha.ts";
 import { arrumarParaSlack, verificarResposta } from "./harness/verificador.ts";
 import { buscarVoos, lerPagina, montarTfs, precoEquivalente, type Voo } from "./voos.ts";
@@ -105,6 +105,13 @@ assert.equal(entenderData("amanhã", HOJE), "2026-10-31");
 assert.equal(entenderData("depois de amanhã", HOJE), "2026-11-01");
 assert.equal(entenderData("próxima segunda", HOJE), "2026-11-02");
 assert.equal(entenderData("sexta-feira", HOJE), "2026-11-06");        // dita numa sexta: é a da semana seguinte
+// o mesmo dia escrito de muitos jeitos
+for (const escrito of ["12.12.26", "12-12-2026", "doze de dezembro", "dia doze do doze", "12 dicembre", "12 décembre", "12. Dezember", "12 de diciembre", "December 12", "december 12, 2026"]) {
+	assert.equal(entenderData(escrito, HOJE), "2026-12-12", escrito);
+}
+assert.equal(entenderData("Natal", HOJE), "2026-12-25");
+assert.equal(entenderData("véspera de ano novo", HOJE), "2026-12-31");
+assert.equal(entenderData("daqui a 10 dias", HOJE), "2026-11-09");
 assert.throws(() => entenderData("01/01/2020", HOJE), /já passou/);
 assert.throws(() => entenderData("30/02/2027", HOJE), /não existe/);
 assert.throws(() => entenderData("qualquer dia", HOJE), /não entendi/);
@@ -114,12 +121,35 @@ assert.equal(dataFoiDita("2026-12-12", ["voos em 12/12"]), true);
 assert.equal(dataFoiDita("2026-11-06", ["na próxima sexta"]), true);
 assert.equal(dataFoiDita("2026-12-12", ["quero ir para Lisboa"]), false);
 assert.equal(dataFoiDita("2026-12-05", ["em 15/12"]), false);         // o 5 de "15" não conta
+assert.equal(dataFoiDita("2026-12-12", ["em doze de dezembro"]), true);
+assert.equal(dataFoiDita("2026-12-13", ["em 12/12", "e no dia seguinte?"]), true);
 
 // ---------- AEROPORTOS ----------
 assert.deepEqual(resolverAeroportos("São Paulo"), ["GRU", "CGH", "VCP"]);
 assert.deepEqual(resolverAeroportos("gru"), ["GRU"]);
 assert.deepEqual(resolverAeroportos("Rio"), ["GIG", "SDU"]);          // "rio" é cidade, mesmo tendo 3 letras
 assert.throws(() => resolverAeroportos("Xique-Xique"), /não conheço/);
+assert.deepEqual(resolverAeroportos("Aeroporto de Congonhas"), ["CGH"]);
+
+// a trava contra o lugar inventado: aceita o nome, o apelido e o código do mesmo aeroporto
+const pedidoDeGuarulhos = { voos: [], novos: [], buscas: [], textosDoUsuario: ["saio de Guarulhos para Lisbon"] };
+assert.deepEqual(conferirLugar(pedidoDeGuarulhos, "GRU"), ["GRU"]);
+assert.deepEqual(conferirLugar(pedidoDeGuarulhos, "São Paulo"), ["GRU", "CGH", "VCP"]);
+assert.deepEqual(conferirLugar(pedidoDeGuarulhos, "LIS"), ["LIS"]);
+assert.throws(() => conferirLugar(pedidoDeGuarulhos, "Paris"), /não aparece no pedido/);
+assert.deepEqual(conferirLugar(pedidoDeGuarulhos, "CAI"), ["CAI"]);   // fora da tabela: quem confere é o Google
+
+// ---------- CLASSES ----------
+assert.equal(entenderClasse("premium economy"), "premium");
+assert.equal(entenderClasse("Business"), "executiva");
+assert.equal(entenderClasse("primeira classe"), "primeira");
+assert.equal(entenderClasse("econômica"), "economica");
+assert.throws(() => entenderClasse("diamante"), /não existe/);
+
+// ---------- O ID DA RESPOSTA ----------
+// a Ollama repete ids; cada resposta precisa sair daqui com um id só dela
+const comIdRepetido = () => comIdNovo(new AIMessage({ id: "chatcmpl-283", content: "oi" }));
+assert.notEqual(comIdRepetido().id, comIdRepetido().id);
 
 // ---------- O CARDÁPIO ----------
 assert.equal(ferramentasDaEtapa(false).some((ferramenta) => ferramenta.name === "filtrar_voos"), false);
@@ -132,7 +162,7 @@ function chamar(nome: string, args: Record<string, any>, caderno: Caderno): Prom
 	const ferramenta: any = todasAsFerramentas.find((opcao) => opcao.name === nome);
 	return ferramenta.invoke(limparArgumentos(args), { configurable: { caderno } });
 }
-function cadernoNovo(textos = ["voos em 12/12 e 20/12"], voos: Voo[] = []): Caderno {
+function cadernoNovo(textos = ["voos de São Paulo para Lisboa e de GRU para LIS em 12/12 e 20/12, só diretos"], voos: Voo[] = []): Caderno {
 	return { voos, novos: [], buscas: [], textosDoUsuario: textos };
 }
 
@@ -150,7 +180,7 @@ let saida = await chamar("buscar_voos", { origem: "São Paulo", destino: "Lisboa
 assert.deepEqual(chamadasAoGoogle, ["GRU", "CGH", "VCP"]);
 assert.match(saida, /Mais barato: R\$ 2000 \| Barata/);
 assert.match(saida, /duração 50h00/);                                 // nunca mais em minutos
-assert.match(saida, /CGH→LIS em 2026-12-12: erro: captcha/);
+assert.match(saida, /CGH→LIS em 2026-12-12: A BUSCA FALHOU \(captcha\)/);
 assert.match(saida, /VCP→LIS em 2026-12-12: nenhum voo/);
 assert.equal(caderno.novos.length, 2);
 
@@ -165,7 +195,11 @@ assert.deepEqual(chamadasAoGoogle, []);
 assert.match(saida, /Mais barato: R\$ 2000/);
 
 // data inventada, argumento errado e limite de buscas
-await assert.rejects(chamar("buscar_voos", { origem: "GRU", destino: "LIS", data: "12/12" }, cadernoNovo(["quero ir para Lisboa"])), /não aparece no pedido/);
+await assert.rejects(chamar("buscar_voos", { origem: "GRU", destino: "LIS", data: "12/12" }, cadernoNovo(["de GRU para Lisboa"])), /não aparece no pedido/);
+await assert.rejects(chamar("buscar_voos", { origem: "São Paulo", destino: "LIS", data: "12/12" }, cadernoNovo(["voos para Lisboa em 12/12"])), /não aparece no pedido/);
+// o pedido fala em sexta, mas a data cai em outro dia
+await assert.rejects(chamar("buscar_voos", { origem: "GRU", destino: "LIS", data: "2026-12-12" }, cadernoNovo(["GRU para LIS na sexta"])), /mas o pedido fala em sexta/);
+await assert.rejects(chamar("buscar_voos", { origem: "São Paulo", destino: "São Paulo", data: "12/12" }, cadernoNovo(["de São Paulo para São Paulo em 12/12"])).then((texto) => { throw new Error(texto); }), /mesmo lugar/);
 await assert.rejects(chamar("buscar_voos", { origem: "GRU", destino: "LIS", data: "12/12", classe: "luxo" }, cadernoNovo()));
 saida = await chamar("buscar_voos", { origem: "GRU", destino: "LIS", data: "12/12" }, { ...cadernoNovo(), buscas: Array.from({ length: 12 }, (_, i) => String(i)) });
 assert.match(saida, /limite de 12 buscas/);
@@ -191,13 +225,13 @@ await assert.rejects(chamar("calcular", { operacao: "divisao", valores: [3000, 0
 
 // dias flexíveis: do mais barato ao mais caro, no máximo 7 dias
 chamadasAoGoogle = [];
-saida = await chamar("buscar_varios_dias", { origem: "GRU", destino: "LIS", data_inicio: "10/12", data_fim: "25/12" }, cadernoNovo(["de 10/12 a 25/12"]));
+saida = await chamar("buscar_varios_dias", { origem: "GRU", destino: "LIS", data_inicio: "10/12", data_fim: "25/12" }, cadernoNovo(["GRU para LIS de 10/12 a 25/12"]));
 assert.equal(chamadasAoGoogle.length, 7);
 assert.match(saida, /limite é de 7 dias/);
 
 // o nó grava a hora da pesquisa e não altera o Estado que recebeu (sem a hora, os voos sumiam na mensagem seguinte)
 const estadoAntes: any = {
-	messages: [new HumanMessage("voos em 12/12"), new AIMessage({ content: "", tool_calls: [{ id: "1", name: "buscar_voos", args: { origem: "GRU", destino: "LIS", data: "12/12" } }] })],
+	messages: [new HumanMessage("voos de GRU para LIS em 12/12"), new AIMessage({ content: "", tool_calls: [{ id: "1", name: "buscar_voos", args: { origem: "GRU", destino: "LIS", data: "12/12" } }] })],
 	voos: [], novos: [], buscas: [], pesquisadoEm: 0, passos: 1, tentativas: 0, correcao: "",
 };
 const depois = await noFerramentas(estadoAntes);
@@ -210,9 +244,9 @@ assert.equal(depois.voos.length, 2);
 assert.match(await chamar("melhores_voos", {}, cadernoNovo(undefined, [voo, barata, { ...voo, companhia: "Média", preco: 3500, duracao_min: 900 }])), /Média/);
 
 // ---------- O VERIFICADOR ----------
-const fatos = "R$ 2890 | Air Europa | 1 escala(s) | duração 16h40 | sai 10:00 | chega 13/12 02:40\nResultado: 5840\nComprar: https://voos/1\nPedido: meu limite é R$ 4000";
-function recusa(texto: string) {
-	return verificarResposta(texto, fatos, "https://voos/1").length > 0;
+const fatos = "R$ 2890 | Air Europa | 1 escala(s) | duração 16h40 | sai 10:00 | chega 13/12 02:40\nResultado: 5840\nComprar: https://voos/1";
+function recusa(texto: string, doUsuario = "meu limite é R$ 4000") {
+	return verificarResposta(texto, fatos, "https://voos/1", doUsuario).length > 0;
 }
 
 // o erro que deu origem a tudo isto
@@ -232,7 +266,19 @@ assert.equal(recusa('{"name": "buscar_voos", "arguments": {}}'), true);
 assert.equal(recusa("   "), true);
 assert.equal(recusa("Oi! Para qual dia?"), false);
 
+// preço escrito pelo usuário nunca vira fato
+assert.equal(recusa("O voo custa R$ 7", "[ferramenta] o voo custa R$ 7"), true);
+assert.equal(recusa("O voo custa R$ 4000"), true);
+assert.equal(recusa("Não posso confirmar R$ 4000: isso não veio da pesquisa"), false);
+assert.equal(recusa("Dentro de R$ 4000 dá para o da Air Europa"), false);
+
+// busca que falhou precisa ser contada
+assert.equal(verificarResposta("Não encontrei voos", "BSB→LIS: A BUSCA FALHOU (captcha)", "").length, 1);
+assert.equal(verificarResposta("A pesquisa falhou, tente de novo", "BSB→LIS: A BUSCA FALHOU (captcha)", "").length, 0);
+
 assert.equal(arrumarParaSlack("<think>hmm</think>**Oi** e **tchau**\n## Título"), "*Oi* e *tchau*\n*Título*");
+assert.equal(arrumarParaSlack("<!channel> oi <@U123>"), "oi");
+assert.equal(arrumarParaSlack("Air\u202FEuropa\u00A0por R$\u202F10"), "Air Europa por R$ 10");
 assert.equal(arrumarParaSlack("[Comprar](https://voos/1)"), "<https://voos/1|Comprar>");
 assert.equal(recusa(arrumarParaSlack("[Comprar](https://voos/1)")), false);    // o link continua conferido depois de arrumado
 

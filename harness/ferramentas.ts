@@ -40,6 +40,12 @@ const AEROPORTOS: Record<string, string[]> = {
 	"washington": ["IAD"], "toronto": ["YYZ"], "cidade do mexico": ["MEX"], "cancun": ["CUN"],
 	"buenos aires": ["EZE", "AEP"], "santiago": ["SCL"], "montevideu": ["MVD"], "lima": ["LIM"], "bogota": ["BOG"],
 	"toquio": ["HND", "NRT"], "dubai": ["DXB"], "joanesburgo": ["JNB"],
+
+	// apelidos e nomes em outras línguas: modelo fraco não sabe que Cumbica é GRU
+	"sp": ["GRU", "CGH", "VCP"], "guarulhos": ["GRU"], "cumbica": ["GRU"], "congonhas": ["CGH"], "viracopos": ["VCP"], "campinas": ["VCP"],
+	"rj": ["GIG", "SDU"], "galeao": ["GIG"], "tom jobim": ["GIG"], "santos dumont": ["SDU"], "bh": ["CNF"], "confins": ["CNF"],
+	"heathrow": ["LHR"], "gatwick": ["LGW"], "charles de gaulle": ["CDG"], "orly": ["ORY"], "barajas": ["MAD"], "fiumicino": ["FCO"],
+	"lisbon": ["LIS"], "lisbonne": ["LIS"], "lisbona": ["LIS"], "lissabon": ["LIS"], "london": ["LHR", "LGW"], "rome": ["FCO"], "new york": ["JFK", "EWR"], "tokyo": ["HND", "NRT"],
 };
 
 function semAcento(texto: string) {
@@ -48,7 +54,7 @@ function semAcento(texto: string) {
 
 // aceita cidade ou código: "São Paulo" -> GRU, CGH e VCP. O modelo não precisa decorar aeroporto nenhum.
 export function resolverAeroportos(texto: string) {
-	const achados = AEROPORTOS[semAcento(texto)];
+	const achados = AEROPORTOS[semAcento(texto).replace(/^aeroporto (de |do |da )?/, "")];
 	if (achados) return achados;
 	if (/^[A-Za-z]{3}$/.test(texto.trim())) return [texto.trim().toUpperCase()];
 	throw new Error(`não conheço "${texto}". Passe o código de 3 letras do aeroporto; se não souber, pergunte. Não chute.`);
@@ -59,7 +65,20 @@ export function hojeEmSaoPaulo() {
 	return new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" });    // "sv-SE" escreve AAAA-MM-DD
 }
 
-const MESES = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const MESES = [
+	["janeiro", "january", "enero", "janvier", "gennaio", "januar"],
+	["fevereiro", "february", "febrero", "fevrier", "febbraio", "februar"],
+	["marco", "march", "marzo", "mars", "marz"],
+	["abril", "april", "avril", "aprile"],
+	["maio", "may", "mayo", "mai", "maggio"],
+	["junho", "june", "junio", "juin", "giugno", "juni"],
+	["julho", "july", "julio", "juillet", "luglio", "juli"],
+	["agosto", "august", "aout"],
+	["setembro", "september", "septiembre", "septembre", "settembre"],
+	["outubro", "october", "octubre", "octobre", "ottobre", "oktober"],
+	["novembro", "november", "noviembre", "novembre"],
+	["dezembro", "december", "diciembre", "decembre", "dicembre", "dezember"],
+];
 const DIAS_DA_SEMANA = ["domingo", "segunda", "terca", "quarta", "quinta", "sexta", "sabado"];
 const NOMES_DOS_DIAS = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
 
@@ -86,22 +105,48 @@ function proximaOcorrencia(mes: number, dia: number, hoje: string) {
 	return data >= hoje ? data : montarData(ano + 1, mes, dia);
 }
 
-// "12/12", "12 de dezembro", "dia 13", "amanhã", "próxima sexta", "2026-12-12" -> AAAA-MM-DD
+// "doze de dezembro" -> "12 de dezembro"
+const POR_EXTENSO: Record<string, number> = {
+	primeiro: 1, um: 1, dois: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10, onze: 11, doze: 12, treze: 13, catorze: 14, quatorze: 14,
+	quinze: 15, dezesseis: 16, dezessete: 17, dezoito: 18, dezenove: 19, vinte: 20, trinta: 30,
+};
+
+function trocarNumeros(texto: string) {
+	return texto
+		.replace(/\b(vinte|trinta) e (um|dois|tres|quatro|cinco|seis|sete|oito|nove)\b/g, (_, dezena, unidade) => String(POR_EXTENSO[dezena] + POR_EXTENSO[unidade]))
+		.replace(/\b[a-z]+\b/g, (palavra) => (Object.hasOwn(POR_EXTENSO, palavra) ? String(POR_EXTENSO[palavra]) : palavra));
+}
+
+// "12 de dezembro", "12. Dezember", "December 12, 2026"
+function dataComNomeDoMes(limpo: string, hoje: string) {
+	const diaPrimeiro = [...limpo.matchAll(/\b(\d{1,2})(?:\.|st|nd|rd|th)?\s+(?:de\s+|del\s+|of\s+)?([a-z]+)(?:\s+(?:de\s+|del\s+)?(\d{4}))?/g)].map((a) => ({ dia: a[1], nome: a[2], ano: a[3] }));
+	const mesPrimeiro = [...limpo.matchAll(/\b([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4}))?/g)].map((a) => ({ dia: a[2], nome: a[1], ano: a[3] }));
+	for (const { dia, nome, ano } of [...diaPrimeiro, ...mesPrimeiro]) {
+		const mes = MESES.findIndex((nomes) => nomes.includes(nome)) + 1;
+		if (mes > 0) return ano ? montarData(Number(ano), mes, Number(dia)) : proximaOcorrencia(mes, Number(dia), hoje);
+	}
+	return null;
+}
+
+// "12/12", "12.12.26", "12 de dezembro", "dia 13", "amanhã", "daqui a 10 dias", "Natal", "próxima sexta", "2026-12-12" -> AAAA-MM-DD
 export function entenderData(texto: string, hoje = hojeEmSaoPaulo()) {
-	const limpo = semAcento(texto);
+	const limpo = trocarNumeros(semAcento(texto));
 	let achado;
 	let data;
 
 	if ((achado = limpo.match(/\b(\d{4})-(\d{2})-(\d{2})\b/))) data = montarData(Number(achado[1]), Number(achado[2]), Number(achado[3]));
-	else if ((achado = limpo.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})\b/))) data = montarData(Number(achado[3].padStart(4, "20")), Number(achado[2]), Number(achado[1]));
-	else if ((achado = limpo.match(/\b(\d{1,2})\/(\d{1,2})\b/))) data = proximaOcorrencia(Number(achado[2]), Number(achado[1]), hoje);
+	else if ((achado = limpo.match(/\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})\b/))) data = montarData(Number(achado[3].padStart(4, "20")), Number(achado[2]), Number(achado[1]));
+	else if ((achado = limpo.match(/\b(\d{1,2})(?:[/.-]|\s+do\s+)(\d{1,2})\b/))) data = proximaOcorrencia(Number(achado[2]), Number(achado[1]), hoje);
+	else if (limpo.includes("vespera de natal")) data = proximaOcorrencia(12, 24, hoje);
+	else if (limpo.includes("natal")) data = proximaOcorrencia(12, 25, hoje);
+	else if (/vespera de ano novo|reveillon|virada/.test(limpo)) data = proximaOcorrencia(12, 31, hoje);
+	else if (limpo.includes("ano novo")) data = proximaOcorrencia(1, 1, hoje);
 	else if (limpo.includes("depois de amanha")) data = somarDias(hoje, 2);
-	else if (limpo.includes("amanha")) data = somarDias(hoje, 1);
-	else if (limpo.includes("hoje")) data = hoje;
-	else if ((achado = limpo.match(/\b(\d{1,2})\s+de\s+([a-z]+)(?:\s+de\s+(\d{4}))?/)) && MESES.includes(achado[2])) {
-		const mes = MESES.indexOf(achado[2]) + 1;
-		data = achado[3] ? montarData(Number(achado[3]), mes, Number(achado[1])) : proximaOcorrencia(mes, Number(achado[1]), hoje);
-	} else if ((achado = limpo.match(/\bdia\s+(\d{1,2})\b/))) {
+	else if (/amanha|tomorrow/.test(limpo)) data = somarDias(hoje, 1);
+	else if (/hoje|today/.test(limpo)) data = hoje;
+	else if ((achado = limpo.match(/\b(?:daqui a|em)\s+(\d{1,3})\s+dias\b/))) data = somarDias(hoje, Number(achado[1]));
+	else if ((data = dataComNomeDoMes(limpo, hoje))) data = data;
+	else if ((achado = limpo.match(/\bdia\s+(\d{1,2})\b/))) {
 		// só o dia: este mês se ainda não passou, senão o mês que vem
 		const dia = Number(achado[1]);
 		const mesAtual = Number(hoje.slice(5, 7));
@@ -125,8 +170,8 @@ export function entenderData(texto: string, hoje = hojeEmSaoPaulo()) {
 export function dataFoiDita(data: string, textos: string[]) {
 	const dia = Number(data.slice(8, 10));
 	return textos.some((texto) => {
-		const limpo = semAcento(texto);
-		const palavraDeTempo = /hoje|amanha|semana|segunda|terca|quarta|quinta|sexta|sabado|domingo/.test(limpo);
+		const limpo = trocarNumeros(semAcento(texto));
+		const palavraDeTempo = /hoje|amanha|semana|segunda|terca|quarta|quinta|sexta|sabado|domingo|seguinte|vespera|anterior|depois|antes|daqui|natal|ano novo|reveillon|today|tomorrow|next|monday|tuesday|wednesday|thursday|friday|saturday|sunday/.test(limpo);
 		return palavraDeTempo || new RegExp(`(^|\\D)0?${dia}(\\D|$)`).test(limpo);
 	});
 }
@@ -150,10 +195,11 @@ export function resumirTrecho(nome: string, voos: Voo[]) {
 	const barato = voos.toSorted((a, b) => a.preco - b.preco)[0];
 	const rapido = voos.toSorted((a, b) => a.duracao_min - b.duracao_min)[0];
 	const melhor = voos.toSorted((a, b) => precoEquivalente(a) - precoEquivalente(b))[0];
+	const caro = voos.toSorted((a, b) => b.preco - a.preco)[0];
 	// a lista também vai junto: sem ela, o modelo diz que uma companhia "não apareceu" só porque não venceu nada
 	const lista = voos.toSorted((a, b) => a.preco - b.preco).slice(0, 10).map(descreverVoo).join("\n");
 	const resto = voos.length > 10 ? `\nHá mais ${voos.length - 10} voos: use filtrar_voos para ver.` : "";
-	return `${nome} (${voos.length} voos)\nMais barato: ${descreverVoo(barato)}\nMais rápido: ${descreverVoo(rapido)}\nMelhor custo-benefício: ${descreverVoo(melhor)}\nComprar: ${barato.link}\nOs voos, do mais barato ao mais caro:\n${lista}${resto}`;
+	return `${nome} (${voos.length} voos)\nMais barato: ${descreverVoo(barato)}\nMais rápido: ${descreverVoo(rapido)}\nMelhor custo-benefício: ${descreverVoo(melhor)}\nMais caro: ${descreverVoo(caro)}\nComprar: ${barato.link}\nOs voos, do mais barato ao mais caro:\n${lista}${resto}`;
 }
 
 export function resumirVoos(voos: Voo[]) {
@@ -178,6 +224,7 @@ async function pesquisar(caderno: Caderno, origem: string, destino: string, data
 
 // um aeroporto com erro não derruba os outros: a resposta conta o que deu certo e o que falhou
 async function pesquisarVarios(caderno: Caderno, origens: string[], destinos: string[], datas: string[], adultos: number, criancas: number, classe: string) {
+	if (origens.some((origem) => destinos.includes(origem))) throw new Error("a origem e o destino são o mesmo lugar. Avise e pergunte o destino certo.");
 	const achados: Voo[] = [];
 	const avisos: string[] = [];
 	for (const data of datas) {
@@ -189,7 +236,7 @@ async function pesquisarVarios(caderno: Caderno, origens: string[], destinos: st
 					else if (voos.length === 0) avisos.push(`${origem}→${destino} em ${data}: nenhum voo encontrado.`);
 					else achados.push(...voos);
 				} catch (erro: any) {
-					avisos.push(`${origem}→${destino} em ${data}: erro: ${erro.message}`);
+					avisos.push(`${origem}→${destino} em ${data}: A BUSCA FALHOU (${erro.message}). Isso não quer dizer que não há voos: avise que a pesquisa falhou e peça para tentar de novo.`);
 				}
 			}
 		}
@@ -200,7 +247,33 @@ async function pesquisarVarios(caderno: Caderno, origens: string[], destinos: st
 function conferirData(caderno: Caderno, texto: string) {
 	const data = entenderData(texto);
 	if (!dataFoiDita(data, caderno.textosDoUsuario)) throw new Error(`a data ${data} não aparece no pedido. Não escolha uma data: pergunte qual é o dia.`);
+	// se o pedido fala em sexta, a data precisa cair numa sexta: modelo fraco erra essa conta
+	const ultimo = semAcento(caderno.textosDoUsuario.at(-1) ?? "");
+	const citados = DIAS_DA_SEMANA.filter((nome) => ultimo.includes(nome));
+	const diaDaData = DIAS_DA_SEMANA[new Date(data + "T00:00:00Z").getUTCDay()];
+	if (citados.length > 0 && !citados.includes(diaDaData)) throw new Error(`${data} cai em ${diaDaSemana(data)}, mas o pedido fala em ${citados.join(" ou ")}. Passe a data como veio no pedido, como "próxima sexta".`);
 	return data;
+}
+
+// a trava contra o lugar inventado: uma cidade que conhecemos precisa ter aparecido no que a pessoa escreveu
+export function conferirLugar(caderno: Caderno, texto: string) {
+	const codigos = resolverAeroportos(texto);
+	const nomes = Object.keys(AEROPORTOS).filter((nome) => AEROPORTOS[nome].some((codigo) => codigos.includes(codigo)));
+	if (nomes.length === 0) return codigos;    // um código fora da nossa tabela: quem confere é o Google
+	const formas = [...nomes, ...codigos.map((codigo) => codigo.toLowerCase())];
+	const foiDito = caderno.textosDoUsuario.some((pedido) => formas.some((forma) => new RegExp(`\\b${forma}\\b`).test(semAcento(pedido))));
+	if (!foiDito) throw new Error(`"${texto}" não aparece no pedido. Não escolha origem nem destino: pergunte.`);
+	return codigos;
+}
+
+// aceita "business", "premium economy", "primeira classe"...: o modelo não precisa acertar a palavra exata
+export function entenderClasse(texto: string) {
+	const limpo = semAcento(texto);
+	if (limpo.includes("premium")) return "premium";
+	if (/execut|business/.test(limpo)) return "executiva";
+	if (/primeira|first/.test(limpo)) return "primeira";
+	if (/econom|coach/.test(limpo)) return "economica";
+	throw new Error(`a classe "${texto}" não existe. As classes são economica, premium, executiva e primeira: avise e pergunte qual prefere.`);
 }
 
 // ---------- OS CAMPOS QUE SE REPETEM ----------
@@ -208,7 +281,7 @@ function conferirData(caderno: Caderno, texto: string) {
 const passageiros = {
 	adultos: z.coerce.number().int().default(1).describe("Quantos adultos. Se o pedido não disser, 1."),
 	criancas: z.coerce.number().int().default(0).describe("Quantas crianças de 2 a 11 anos. Se o pedido não disser, 0."),
-	classe: z.enum(["economica", "premium", "executiva", "primeira"]).default("economica").describe("Se o pedido não disser, economica."),
+	classe: z.string().default("economica").describe("economica, premium, executiva ou primeira. Se o pedido não disser, economica."),
 };
 
 function trechoNaMemoria(origem?: string, destino?: string, data?: string) {
@@ -244,7 +317,7 @@ const buscarVoosFerramenta = tool(
 	async ({ origem, destino, data, adultos, criancas, classe }, config) => {
 		const caderno = cadernoDe(config);
 		const dia = conferirData(caderno, data);
-		const { achados, avisos } = await pesquisarVarios(caderno, resolverAeroportos(origem), resolverAeroportos(destino), [dia], adultos, criancas, classe);
+		const { achados, avisos } = await pesquisarVarios(caderno, conferirLugar(caderno, origem), conferirLugar(caderno, destino), [dia], adultos, criancas, entenderClasse(classe));
 		const trechos = [...agruparPorTrecho(achados)].map(([nome, voos]) => resumirTrecho(nome, voos));
 		return [...trechos, ...avisos].join("\n\n") || "Nenhum voo encontrado.";
 	},
@@ -268,7 +341,7 @@ const buscarVariosDias = tool(
 		const datas: string[] = [];
 		for (let dia = inicio; dia <= fim && datas.length < 7; dia = somarDias(dia, 1)) datas.push(dia);
 
-		const { achados, avisos } = await pesquisarVarios(caderno, resolverAeroportos(origem), resolverAeroportos(destino), datas, adultos, criancas, classe);
+		const { achados, avisos } = await pesquisarVarios(caderno, conferirLugar(caderno, origem), conferirLugar(caderno, destino), datas, adultos, criancas, entenderClasse(classe));
 		const maisBaratoDoDia = [...Map.groupBy(achados, (voo) => voo.data).values()].map((voos) => voos.toSorted((a, b) => a.preco - b.preco)[0]);
 		const linhas = maisBaratoDoDia.toSorted((a, b) => a.preco - b.preco).map((voo) => `${voo.data} (${diaDaSemana(voo.data)}) ${voo.origem}→${voo.destino}: ${descreverVoo(voo)}`);
 		const cortado = fim > datas.at(-1)! ? [`Só pesquisei até ${datas.at(-1)}: o limite é de 7 dias.`] : [];
@@ -276,7 +349,7 @@ const buscarVariosDias = tool(
 	},
 	{
 		name: "buscar_varios_dias",
-		description: "Para datas flexíveis: pesquisa cada dia de um período (até 7 dias) e devolve os dias do mais barato ao mais caro.",
+		description: "Só para um período de dias seguidos (até 7 dias): pesquisa cada dia e devolve do mais barato ao mais caro. Para dias soltos, chame buscar_voos uma vez para cada dia.",
 		schema: z.object({
 			origem: z.string().describe("Cidade ou código do aeroporto"),
 			destino: z.string().describe("Cidade ou código do aeroporto"),
@@ -330,12 +403,15 @@ const filtrarVoos = tool(
 			custo_beneficio: (a: Voo, b: Voo) => precoEquivalente(a) - precoEquivalente(b),
 			saida: (a: Voo, b: Voo) => a.saida.localeCompare(b.saida),
 		};
+		const caderno = cadernoDe(config);
 		const noTrecho = trechoNaMemoria(filtro.origem, filtro.destino, filtro.data);
-		const voos = cadernoDe(config).voos
+		// modelo fraco preenche os campos que não usa com 0. Aqui 0 quer dizer "só diretos", então só vale se o pedido falar disso.
+		const falouDeEscalas = /diret|direct|direk|escala|escale|stop|conex|parada/.test(semAcento(caderno.textosDoUsuario.at(-1) ?? ""));
+		const escalasMaximas = filtro.escalas_maximas === 0 && !falouDeEscalas ? undefined : filtro.escalas_maximas;
+		const voos = caderno.voos
 			.filter(noTrecho)
-			.filter((voo) => filtro.escalas_maximas === undefined || voo.escalas <= filtro.escalas_maximas)
-			// modelo fraco preenche os campos que não usa com 0. Preço ou duração 0 não existem, então 0 quer dizer "sem limite".
-			// Já escalas_maximas 0 é de verdade: quer dizer só voos diretos.
+			.filter((voo) => escalasMaximas === undefined || voo.escalas <= escalasMaximas)
+			// preço ou duração 0 não existem, então 0 quer dizer "sem limite"
 			.filter((voo) => !filtro.preco_maximo || voo.preco <= filtro.preco_maximo)
 			.filter((voo) => !filtro.duracao_maxima_horas || voo.duracao_min <= filtro.duracao_maxima_horas * 60)
 			.filter((voo) => !filtro.companhia || semAcento(voo.companhia).includes(semAcento(filtro.companhia)))
@@ -403,10 +479,25 @@ const combinarIdaEVolta = tool(
 	},
 );
 
+function minutosDe(texto: string) {
+	const achado = semAcento(texto).match(/^(\d{1,3})\s*h(?:oras?)?\s*(?:e\s*)?(\d{1,2})?/);
+	if (!achado) throw new Error(`não entendi a duração "${texto}". Passe como veio, como 12h50.`);
+	return Number(achado[1]) * 60 + Number(achado[2] ?? 0);
+}
+
+const diferencaDeDuracao = tool(
+	async ({ a, b }) => `Diferença: ${horas(Math.abs(minutosDe(a) - minutosDe(b)))}`,
+	{
+		name: "diferenca_de_duracao",
+		description: "Diz quanto tempo uma viagem dura a mais que a outra. Passe as durações como vieram, como 12h50 e 10h20.",
+		schema: z.object({ a: z.string(), b: z.string() }),
+	},
+);
+
 // ---------- O CARDÁPIO ----------
 // quanto menos opções, menos um modelo fraco se confunde: sem voos na memória, as de análise nem aparecem
 const paraBuscar = [buscarVoosFerramenta, buscarVariosDias, buscarAeroportos, entenderDataFerramenta, calcular];
-const paraAnalisar = [filtrarVoos, melhoresVoos, combinarIdaEVolta, listarPesquisas];
+const paraAnalisar = [filtrarVoos, melhoresVoos, combinarIdaEVolta, diferencaDeDuracao, listarPesquisas];
 export const todasAsFerramentas = [...paraBuscar, ...paraAnalisar];
 
 export function ferramentasDaEtapa(temVoos: boolean) {

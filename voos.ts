@@ -137,8 +137,8 @@ export function lerPagina(html: string, origem: string, destino: string, data: s
 
 // ---------- PESQUISAR ----------
 // devolve os voos do mais barato ao mais caro; se algo der errado, lança um erro com a explicação
-export async function buscarVoos(origem: string, destino: string, data: string, adultos = 1, criancas = 0, classe = "economica"): Promise<Voo[]> {
-	// quem escolhe esses valores é o modelo de IA, então conferimos antes de usar
+// quem escolhe esses valores é o modelo de IA, então conferimos antes de usar
+export function conferirPedido(origem: string, destino: string, data: string, adultos: number, criancas: number, classe: string) {
 	if (!/^[A-Z]{3}$/.test(origem) || !/^[A-Z]{3}$/.test(destino)) {
 		throw new Error("origem e destino precisam ser códigos de aeroporto, como GRU ou LIS");
 	}
@@ -152,6 +152,10 @@ export async function buscarVoos(origem: string, destino: string, data: string, 
 	if (!(classe in CLASSES)) {
 		throw new Error("a classe precisa ser economica, premium, executiva ou primeira");
 	}
+}
+
+export async function buscarVoos(origem: string, destino: string, data: string, adultos = 1, criancas = 0, classe = "economica"): Promise<Voo[]> {
+	conferirPedido(origem, destino, data, adultos, criancas, classe);
 
 	const parametros = new URLSearchParams({ tfs: montarTfs(origem, destino, data, adultos, criancas, classe), hl: "pt-BR", curr: "BRL" });
 	const link = "https://www.google.com/travel/flights/search?" + parametros;

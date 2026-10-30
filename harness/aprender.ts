@@ -1,6 +1,7 @@
 // aprender.ts - busca no Langfuse tudo o que deu errado e monta a lista do que melhorar no harness
 //
-// Lê duas coisas: as conversas com a nota "passou" igual a falso e as ferramentas que terminaram em erro.
+// Lê três coisas: os cenários que falharam na prova, as respostas barradas pelo verificador (na prova e no Slack)
+// e as ferramentas que terminaram em erro.
 // Junta os erros parecidos, do mais frequente ao menos frequente, e salva em harness/resultados/melhorias.md.
 // Este arquivo não muda o bot: quem decide a correção é uma pessoa, e a prova (avaliar.ts) confere se ela funcionou.
 //
@@ -70,6 +71,18 @@ for (const erro of erros) {
 	errosParecidos.set(molde, { vezes: (atual?.vezes ?? 0) + 1, exemplo: atual?.exemplo ?? mensagem, trace: atual?.trace ?? erro.traceId });
 }
 
+// ---------- AS RESPOSTAS BARRADAS ----------
+function juntar(mapa: Map<string, number>, texto: string) {
+	const molde = texto.replace(/R\$ [\d.,]+/g, "R$ #").replace(/\d+h\d*/g, "#h").slice(0, 160);
+	mapa.set(molde, (mapa.get(molde) ?? 0) + 1);
+}
+
+const barradas = new Map<string, number>();
+for (const nome of ["verificador_recusou", "emergencia"]) {
+	const lista = await pedirTudo(`/api/public/v3/scores?name=${nome}&dataType=BOOLEAN&fields=core,details&fromTimestamp=${desde}`);
+	for (const nota of lista) for (const problema of String(nota.comment ?? nome).split(" | ")) juntar(barradas, problema);
+}
+
 // ---------- ESCREVER A LISTA ----------
 const projeto = (await pedir("/api/public/projects")).data[0].id;
 const linkDaSessao = (sessao: string) => `${BASE}/project/${projeto}/sessions/${encodeURIComponent(sessao)}`;
@@ -82,6 +95,9 @@ for (const [caso, falhas] of casos) {
 	for (const falha of falhas) partes.push(`- [${falha.modelo}](${linkDaSessao(falha.sessao)}): ${falha.comentario.replaceAll("\n", " ").slice(0, 300)}`);
 	partes.push("");
 }
+partes.push("## Respostas barradas pelo verificador\n");
+for (const [molde, vezes] of [...barradas].toSorted((a, b) => b[1] - a[1])) partes.push(`- ${vezes}x ${molde}`);
+partes.push("");
 partes.push("## Erros de ferramenta\n");
 for (const [molde, { vezes, trace }] of [...errosParecidos].toSorted((a, b) => b[1].vezes - a[1].vezes)) {
 	partes.push(`- ${vezes}x [${molde}](${linkDoTrace(trace)})`);
