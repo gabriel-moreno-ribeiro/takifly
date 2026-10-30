@@ -233,5 +233,7 @@ assert.equal(recusa("   "), true);
 assert.equal(recusa("Oi! Para qual dia?"), false);
 
 assert.equal(arrumarParaSlack("<think>hmm</think>**Oi** e **tchau**\n## Título"), "*Oi* e *tchau*\n*Título*");
+assert.equal(arrumarParaSlack("[Comprar](https://voos/1)"), "<https://voos/1|Comprar>");
+assert.equal(recusa(arrumarParaSlack("[Comprar](https://voos/1)")), false);    // o link continua conferido depois de arrumado
 
 console.log("Tudo certo!");

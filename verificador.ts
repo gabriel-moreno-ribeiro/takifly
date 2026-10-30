@@ -82,5 +82,6 @@ export function arrumarParaSlack(texto: string) {
 		.replace(/<think>[\s\S]*?<\/think>/g, "")
 		.replace(/\*\*(.+?)\*\*/g, "*$1*")
 		.replace(/^#{1,6}\s+(.+)$/gm, "*$1*")
+		.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, "<$2|$1>")
 		.trim();
 }
