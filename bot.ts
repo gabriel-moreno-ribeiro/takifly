@@ -36,7 +36,7 @@ const mensagensVistas = new Set<string>();
 
 // ---------- RESPONDER ----------
 // toda vez que chegar uma mensagem, o Slack chama esta função
-app.message(async ({ message, say }) => {
+app.message(async ({ message, say, client }) => {
 	// mensagem editada, apagada etc. tem um "subtype"; só queremos as mensagens normais, que trazem texto
 	if (message.subtype !== undefined) return;
 
@@ -47,15 +47,24 @@ app.message(async ({ message, say }) => {
 	console.log("Chegou uma mensagem: " + texto);
 
 	await naFila(message.channel, async () => {
+		// uma mensagem de progresso que vai sendo editada e some no fim
+		const aviso = await say(":thinking_face: Pensando...");
+		const canal = message.channel;
+		const idDoAviso = aviso.ts!;
+
 		try {
 			// cada canal do Slack é uma conversa separada na memória
-			const resposta = await responder(message.channel, texto);
+			const resposta = await responder(canal, texto, async (progresso) => {
+				// se o aviso falhar, o pedido continua: ele é só um enfeite
+				await client.chat.update({ channel: canal, ts: idDoAviso, text: progresso }).catch(console.log);
+			});
 			console.log("O bot respondeu: " + resposta);
 			await say(resposta);
 		} catch (erro: any) {
 			console.log("Deu erro: ", erro);
 			await say("Deu erro: " + erro.message + "\nPode mandar de novo daqui a pouco: eu continuo de onde parei.");
 		}
+		await client.chat.delete({ channel: canal, ts: idDoAviso }).catch(console.log);
 	});
 });
 

@@ -1,9 +1,9 @@
 // planilha.ts - cria uma planilha no Google Sheets com os voos encontrados
 //
-// Quem cria a planilha é o Apps Script que você já implantou (passagens/planilha_viva.gs).
+// Quem cria a planilha é o Apps Script que você já implantou (a cópia do código está em planilha_viva.gs).
 // Ele é um endereço na internet (PLANILHA_VIVA_URL, no .env): mandamos as abas e ele devolve o link.
 
-import type { Voo } from "./voos.ts";
+import { precoEquivalente, type Voo } from "./voos.ts";
 
 function horas(minutos: number) {
 	// 1050 -> "17h30"
@@ -24,21 +24,23 @@ export function montarAbas(voos: Voo[]) {
 	for (const [nome, lista] of trechos) {
 		const porPreco = lista.toSorted((a, b) => a.preco - b.preco);
 		const porDuracao = lista.toSorted((a, b) => a.duracao_min - b.duracao_min);
+		const porCustoBeneficio = lista.toSorted((a, b) => precoEquivalente(a) - precoEquivalente(b));
 		const barato = porPreco[0];
 		const rapido = porDuracao[0];
+		const melhor = porCustoBeneficio[0];
 
-		resumo.push([nome, lista.length, barato.preco, barato.companhia, barato.saida, rapido.preco, horas(rapido.duracao_min)]);
+		resumo.push([nome, lista.length, barato.preco, barato.companhia, barato.saida, melhor.preco, melhor.companhia, rapido.preco, horas(rapido.duracao_min)]);
 		abasDosTrechos.push({
 			nome,
-			colunas: ["companhia", "preco", "escalas", "duracao", "saida", "chegada", "link"],
-			linhas: porPreco.map((voo) => [voo.companhia, voo.preco, voo.escalas, horas(voo.duracao_min), voo.saida, voo.chegada, voo.link]),
+			colunas: ["companhia", "preco", "custo_beneficio", "escalas", "duracao", "saida", "chegada", "link"],
+			linhas: porPreco.map((voo) => [voo.companhia, voo.preco, precoEquivalente(voo), voo.escalas, horas(voo.duracao_min), voo.saida, voo.chegada, voo.link]),
 		});
 	}
 
 	return [
 		{
 			nome: "Resumo",
-			colunas: ["trecho", "voos", "mais_barato", "companhia", "saida", "mais_rapido", "duracao_mais_rapido"],
+			colunas: ["trecho", "voos", "mais_barato", "companhia", "saida", "melhor_custo_beneficio", "companhia_cb", "mais_rapido", "duracao_mais_rapido"],
 			linhas: resumo,
 		},
 		...abasDosTrechos,
