@@ -74,6 +74,8 @@ function fatosErrados(resposta: string) {
 		for (const achado of duracoes) {
 			const minutos = horasEmMinutos(achado[1], achado[2]);
 			// a linha pode comparar com outro voo ("em vez de 24h35"), então vale qualquer duração que exista
+			// "economiza 14h15 de viagem" é uma diferença, e não a duração de um voo
+			if (/economiz|a mais|a menos|diferen|saves?\b|less|more/i.test(linha)) continue;
 			if (!precosDasBuscas.some((voo) => voo.duracao_min === minutos)) problemas.push(`duração errada para ${nome}: ${linha}`);
 		}
 	}
@@ -136,7 +138,7 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 		mensagens: ["quero ir para Lisboa"],
 		juiz: (r) => [
 			...(buscas.length === 0 ? [] : ["inventou a data: " + JSON.stringify(buscas[0])]),
-			...(r.ultima.includes("?") ? [] : ["não perguntou nada"]),
+			...(/\?|informe|preciso saber|me diga/i.test(r.ultima) ? [] : ["não perguntou nada"]),
 			...semReais(r.ultima),
 		],
 	},
@@ -362,7 +364,7 @@ function juizDoCenario(c: Cenario) {
 			...(c.cita ?? []).flatMap((valor) => citou(r.ultima, valor)),
 			...(c.tem ? exigir(c.tem.test(r.ultima), `faltou ${c.tem}: ${inicio}`) : []),
 			...(c.naoTem ? exigir(!c.naoTem.test(r.ultima), `não podia ter ${c.naoTem}: ${inicio}`) : []),
-			...(c.pergunta ? exigir(r.ultima.includes("?"), `não perguntou: ${inicio}`) : []),
+			...(c.pergunta ? exigir(/\?|informe|preciso saber|me diga/i.test(r.ultima), `não perguntou: ${inicio}`) : []),
 			...(c.semPreco ? semReais(r.ultima) : []),
 		];
 	};

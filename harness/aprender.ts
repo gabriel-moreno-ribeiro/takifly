@@ -20,6 +20,12 @@ const CHAVE = Buffer.from(`${process.env.LANGFUSE_PUBLIC_KEY}:${process.env.LANG
 
 async function pedir(caminho: string) {
 	const resposta = await fetch(BASE + caminho, { headers: { Authorization: "Basic " + CHAVE } });
+	// o Langfuse limita os pedidos por minuto e diz quanto tempo esperar
+	if (resposta.status === 429) {
+		const { details } = await resposta.json();
+		await new Promise((pronto) => setTimeout(pronto, (details?.retryAfterSeconds ?? 60) * 1000));
+		return pedir(caminho);
+	}
 	if (!resposta.ok) throw new Error(`o Langfuse respondeu ${resposta.status}: ${(await resposta.text()).slice(0, 300)}`);
 	return resposta.json();
 }
