@@ -31,10 +31,14 @@ const Estado = Annotation.Root({
 	}),
 });
 
+// ---------- SERVIÇOS DE FORA ----------
+// o que sai do Mac fica neste objeto para a prova (avaliar.ts) poder trocar por versões de mentira
+export const servicos = { buscarVoos, criarPlanilha };
+
 // ---------- MODELO ----------
 // a Ollama Cloud entende o mesmo formato da OpenAI, então usamos o ChatOpenAI apontando para ela
 const modelo = new ChatOpenAI({
-	model: "glm-5.3",
+	model: process.env.MODELO ?? "glm-5.3",
 	apiKey: process.env.OLLAMA_API_KEY,
 	configuration: { baseURL: "https://ollama.com/v1" },
 	timeout: 120_000,
@@ -124,7 +128,7 @@ async function noFerramentas(estado: typeof Estado.State) {
 		try {
 			if (chamada.name === "buscar_voos") {
 				const { origem, destino, data, adultos, criancas, classe } = chamada.args;
-				const novos = await buscarVoos(origem, destino, data, adultos, criancas, classe);
+				const novos = await servicos.buscarVoos(origem, destino, data, adultos, criancas, classe);
 				// se o mesmo trecho for pesquisado de novo, ficam só os preços mais recentes
 				const outrosTrechos = voos.filter((voo) => voo.origem !== origem || voo.destino !== destino || voo.data !== data);
 				voos = [...outrosTrechos, ...novos];
@@ -133,7 +137,7 @@ async function noFerramentas(estado: typeof Estado.State) {
 				if (voos.length === 0) {
 					resultado = "Não há voos novos para colocar numa planilha. Pesquise antes.";
 				} else {
-					resultado = "Planilha criada: " + (await criarPlanilha(chamada.args.titulo, voos));
+					resultado = "Planilha criada: " + (await servicos.criarPlanilha(chamada.args.titulo, voos));
 					voos = [];
 				}
 			} else {
@@ -158,7 +162,7 @@ function proximoPasso(estado: typeof Estado.State) {
 
 // ---------- GRAFO ----------
 // o SqliteSaver guarda a pasta num arquivo depois de cada nó: é a memória que sobrevive ao Ctrl+C
-const memoria = SqliteSaver.fromConnString(import.meta.dirname + "/memoria.sqlite");
+const memoria = SqliteSaver.fromConnString(process.env.MEMORIA ?? import.meta.dirname + "/memoria.sqlite");
 
 const grafo = new StateGraph(Estado)
 	.addNode("modelo", noModelo)
