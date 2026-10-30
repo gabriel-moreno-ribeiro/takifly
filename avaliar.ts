@@ -7,39 +7,25 @@
 //   node avaliar.ts                                  usa o modelo padrão
 //   MODELO=gpt-oss:20b node avaliar.ts               usa outro modelo
 //   node avaliar.ts cidade                           só os casos com "cidade" no nome
+//   PARTE=2/8 node avaliar.ts                        só a 2ª de 8 partes (para rodar vários ao mesmo tempo)
+//
+// Cada resultado é salvo em resultados/<modelo>.jsonl assim que sai. Rodar de novo pula o que já terminou.
+// Para ver a comparação entre os modelos:   node comparar.ts
 
-import type { Voo } from "./voos.ts";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
+
+import { LangfuseClient } from "@langfuse/client";
+
+import { BASE, catalogo, type Cenario, cenarios, proximoDia } from "./cenarios.ts";
 
 // ---------- MEMÓRIA SEPARADA ----------
 // precisa vir antes de carregar o agente: a prova nunca pode mexer na sua conversa do Slack
 process.env.MEMORIA = ":memory:";
 const { responder } = await import("./agente.ts");
 const { servicos } = await import("./ferramentas.ts");
+const { enviarRastreio } = await import("./rastreio.ts");
 
-// ---------- OS VOOS DE MENTIRA ----------
-const BASE = [
-	{ companhia: "TAP", preco: 3200, duracao_min: 620, escalas: 0, saida: "22:10", chegada: "13/12 12:30" },
-	{ companhia: "Air Europa", preco: 2890, duracao_min: 1000, escalas: 1, saida: "10:00", chegada: "13/12 02:40" },
-	{ companhia: "LATAM + Iberia", preco: 2650, duracao_min: 1475, escalas: 2, saida: "06:15", chegada: "13/12 06:50" },
-	{ companhia: "Azul", preco: 3050, duracao_min: 770, escalas: 1, saida: "18:30", chegada: "13/12 07:20" },
-];
-
-// o preço muda com o dia, a rota, os passageiros e a classe, sempre do mesmo jeito
-function catalogo(origem: string, destino: string, data: string, adultos = 1, criancas = 0, classe = "economica"): Voo[] {
-	if (destino === "ZZZ" || origem === "CGH") return [];
-	const extraDaRota = origem === "VCP" ? 150 : origem === "LIS" ? 100 : destino === "MAD" ? -100 : 0;
-	const extraDoDia = (Number(data.slice(8, 10)) % 7) * 40;
-	const fatorDaClasse = classe === "executiva" ? 2 : 1;
-	return BASE.map((voo) => ({
-		...voo,
-		origem,
-		destino,
-		data,
-		preco: (voo.preco + extraDaRota + extraDoDia) * (adultos + criancas) * fatorDaClasse,
-		link: `https://voos.falsos/${origem}-${destino}-${data}`,
-	})).toSorted((a, b) => a.preco - b.preco);
-}
-
+// ---------- OS SERVIÇOS DE MENTIRA ----------
 let buscas: any[] = [];
 let planilhas = 0;
 
@@ -49,7 +35,8 @@ servicos.buscarVoos = async (origem: string, destino: string, data: string, adul
 	if (origem === "BSB") throw new Error("o Google pediu captcha");    // a prova de quando o Google sai do ar
 	return catalogo(origem, destino, data, adultos, criancas, classe);
 };
-servicos.criarPlanilha = async () => {
+servicos.criarPlanilha = async (_titulo, voos) => {
+	if (voos.some((voo) => voo.destino === "DUB")) throw new Error("o Google respondeu com erro 500");    // a prova de quando a planilha falha
 	planilhas++;
 	return `https://planilha.falsa/${planilhas}`;
 };
@@ -89,20 +76,14 @@ function fatosErrados(resposta: string) {
 	return problemas;
 }
 
+// "R$ 3.147,50" e "3 147.50" contam como 3147.5
 function temValor(resposta: string, valor: number) {
-	const semPontos = resposta.replace(/(\d)[.\s](\d{3})/g, "$1$2");
+	const semPontos = resposta.replace(/(\d)[.\s](\d{3})/g, "$1$2").replace(/(\d),(\d)/g, "$1.$2");
 	return semPontos.includes(String(valor));
 }
 
 function semReais(resposta: string) {
 	return /R\$\s*\d/.test(resposta) ? ["citou preço sem ter voo: " + resposta.slice(0, 120)] : [];
-}
-
-// 0 é domingo, 5 é sexta, 6 é sábado
-function proximoDia(diaDaSemana: number) {
-	const hoje = new Date(new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" }) + "T00:00:00Z");
-	const faltam = ((diaDaSemana - hoje.getUTCDay() + 6) % 7) + 1;    // de 1 a 7: nunca o próprio dia de hoje
-	return new Date(hoje.getTime() + faltam * 86_400_000).toJSON().slice(0, 10);
 }
 
 function proximaSexta() {
@@ -364,36 +345,81 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 	},
 ];
 
-// ---------- RODAR A PROVA ----------
-const filtro = process.argv[2] ?? "";
-let aprovados = 0;
-const selecionados = casos.filter((caso) => caso.nome.includes(filtro));
-const relatorio = [];
+// ---------- TRANSFORMAR OS CENÁRIOS EM CASOS ----------
+function juizDoCenario(c: Cenario) {
+	return (r: Resultado) => {
+		const fez = (filtro: Record<string, unknown>) => buscas.some((busca) => Object.entries(filtro).every(([campo, valor]) => busca[campo] === valor));
+		const inicio = r.ultima.slice(0, 200);
+		return [
+			...(c.busca ?? []).flatMap((filtro) => exigir(fez(filtro), `não fez a busca ${JSON.stringify(filtro)}; fez ${JSON.stringify(buscas)}`)),
+			...(c.naoBusca ?? []).flatMap((filtro) => exigir(!fez(filtro), `fez uma busca proibida: ${JSON.stringify(filtro)}`)),
+			...(c.semBusca ? semBuscas() : []),
+			...(c.buscaOuPergunta ? exigir(c.buscaOuPergunta.every(fez) || r.ultima.includes("?"), `nem buscou nem perguntou: ${inicio}`) : []),
+			...(c.cita ?? []).flatMap((valor) => citou(r.ultima, valor)),
+			...(c.tem ? exigir(c.tem.test(r.ultima), `faltou ${c.tem}: ${inicio}`) : []),
+			...(c.naoTem ? exigir(!c.naoTem.test(r.ultima), `não podia ter ${c.naoTem}: ${inicio}`) : []),
+			...(c.pergunta ? exigir(r.ultima.includes("?"), `não perguntou: ${inicio}`) : []),
+			...(c.semPreco ? semReais(r.ultima) : []),
+		];
+	};
+}
 
-for (const [indice, caso] of selecionados.entries()) {
+const todos = [...casos, ...cenarios.map((c) => ({ nome: c.nome, mensagens: c.msgs, juiz: juizDoCenario(c) }))];
+const nomes = todos.map((caso) => caso.nome);
+if (new Set(nomes).size !== nomes.length) throw new Error("há dois cenários com o mesmo nome");
+
+// ---------- RODAR A PROVA ----------
+const MODELO = process.env.MODELO ?? "glm-5.3";
+const PASTA = import.meta.dirname + "/resultados";
+const ARQUIVO = `${PASTA}/${MODELO.replaceAll(":", "-")}.jsonl`;
+const TEMPO_MAXIMO = 8 * 60 * 1000;
+await mkdir(PASTA, { recursive: true });
+
+// o que já terminou não roda de novo. Um cenário que parou por erro de rede ou de crédito roda sim, porque não diz nada sobre o modelo.
+const linhas = (await readFile(ARQUIVO, "utf8").catch(() => "")).split("\n").filter(Boolean).map((linha) => JSON.parse(linha));
+const terminados = new Set(linhas.filter((linha) => !linha.erro).map((linha) => linha.caso));
+
+const [parte, partes] = (process.env.PARTE ?? "1/1").split("/").map(Number);
+const filtro = process.argv[2] ?? "";
+const selecionados = todos.filter((caso, indice) => caso.nome.includes(filtro) && indice % partes === parte - 1 && !terminados.has(caso.nome));
+const langfuse = process.env.LANGFUSE_SECRET_KEY ? new LangfuseClient() : null;
+let aprovados = 0;
+
+for (const caso of selecionados) {
 	buscas = [];
 	planilhas = 0;
 	const inicio = Date.now();
+	const conversa = `prova ${MODELO} ${caso.nome} ${inicio}`;
 	let problemas: string[];
 	let ultima = "";
+	let erro = "";
 	try {
-		const conversa = `prova-${indice}`;
-		const respostas: string[] = [];
-		for (const mensagem of caso.mensagens) respostas.push(await responder(conversa, mensagem));
+		const conversar = async () => {
+			const respostas: string[] = [];
+			for (const mensagem of caso.mensagens) respostas.push(await responder(conversa, mensagem));
+			return respostas;
+		};
+		// shortcut: um cenário que estoura o tempo continua rodando por trás e pode somar buscas ao próximo; é raro, e esse próximo só teria a nota errada.
+		const limite = new Promise<never>((_, rejeitar) => setTimeout(() => rejeitar(new Error("passou de 8 minutos")), TEMPO_MAXIMO).unref());
+		const respostas = await Promise.race([conversar(), limite]);
 		ultima = respostas.at(-1)!;
 		problemas = [...caso.juiz({ respostas, ultima }), ...fatosErrados(respostas.join("\n"))];
-	} catch (erro: any) {
-		problemas = ["o bot quebrou: " + erro.message];
+	} catch (falha: any) {
+		erro = falha.message;
+		problemas = ["o bot quebrou: " + erro];
 	}
-	if (problemas.length === 0) aprovados++;
+	const passou = problemas.length === 0;
+	if (passou) aprovados++;
 	const segundos = Math.round((Date.now() - inicio) / 1000);
-	console.log(`${problemas.length === 0 ? "PASSOU" : "FALHOU"} ${caso.nome} (${segundos}s)`);
+	console.log(`${passou ? "PASSOU" : "FALHOU"} ${caso.nome} (${segundos}s)`);
 	for (const problema of problemas) console.log("   - " + problema);
-	relatorio.push({ caso: caso.nome, problemas, resposta: ultima, buscas });
+
+	await appendFile(ARQUIVO, JSON.stringify({ modelo: MODELO, caso: caso.nome, passou, erro, problemas, mensagens: caso.mensagens, resposta: ultima, buscas, segundos, conversa }) + "\n");
+	// a nota aparece na sessão do Langfuse: dá para filtrar só o que falhou
+	langfuse?.score.create({ sessionId: conversa, name: "passou", value: passou ? 1 : 0, dataType: "BOOLEAN", comment: problemas.join(" | ").slice(0, 500) });
 }
 
-console.log(`\nNota de ${process.env.MODELO ?? "glm-5.3"}: ${aprovados} de ${selecionados.length}`);
-if (process.env.RELATORIO) {
-	const { writeFile } = await import("node:fs/promises");
-	await writeFile(process.env.RELATORIO, JSON.stringify(relatorio, null, 2));
-}
+console.log(`\nNota de ${MODELO}: ${aprovados} de ${selecionados.length}`);
+await langfuse?.flush();
+await enviarRastreio();
+process.exit(0);    // um cenário que estourou o tempo não pode segurar o programa aberto

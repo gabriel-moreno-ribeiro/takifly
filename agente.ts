@@ -18,6 +18,7 @@ import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { ChatOpenAI } from "@langchain/openai";
 
 import { type Caderno, descreverVoo, diaDaSemana, ferramentasDaEtapa, hojeEmSaoPaulo, limparArgumentos, resumirVoos, servicos, todasAsFerramentas } from "./ferramentas.ts";
+import { rastrear } from "./rastreio.ts";
 import { arrumarParaSlack, verificarResposta } from "./verificador.ts";
 import type { Voo } from "./voos.ts";
 
@@ -48,8 +49,9 @@ const Estado = Annotation.Root({
 
 // ---------- MODELO ----------
 // a Ollama Cloud entende o mesmo formato da OpenAI, então usamos o ChatOpenAI apontando para ela
+const NOME_DO_MODELO = process.env.MODELO ?? "glm-5.3";
 const modelo = new ChatOpenAI({
-	model: process.env.MODELO ?? "glm-5.3",
+	model: NOME_DO_MODELO,
 	apiKey: process.env.OLLAMA_API_KEY,
 	configuration: { baseURL: "https://ollama.com/v1" },
 	timeout: 120_000,
@@ -247,7 +249,8 @@ function descreverChamada(chamada: { name: string; args: Record<string, any> }) 
 // stream roda o grafo igual ao invoke, mas entrega o resultado de cada nó assim que ele termina.
 // recursionLimit: o freio de mão do LangGraph, bem acima dos nossos limites; só dispara se um limite nosso falhar.
 async function rodar(entrada: { messages: BaseMessage[] } | null, config: { configurable: { thread_id: string } }, avisar: Avisar) {
-	for await (const passo of await grafo.stream(entrada, { ...config, streamMode: "updates", recursionLimit: 60 })) {
+	const callbacks = rastrear(config.configurable.thread_id, NOME_DO_MODELO);
+	for await (const passo of await grafo.stream(entrada, { ...config, streamMode: "updates", recursionLimit: 60, callbacks })) {
 		const resposta = passo.modelo?.messages?.[0] as AIMessage | undefined;
 		for (const chamada of resposta?.tool_calls ?? []) await avisar(descreverChamada(chamada));
 	}
