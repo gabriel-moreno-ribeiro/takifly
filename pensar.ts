@@ -1,10 +1,13 @@
-// pensar.ts - passo 10: o "cérebro" do bot. Recebe um texto, pergunta ao modelo e devolve a resposta.
+// pensar.ts - passo 11: o "cérebro" do bot. Recebe a CONVERSA inteira, pergunta ao modelo e devolve a resposta.
 //
 // Este arquivo não roda sozinho: quem usa ele é o bot.ts (com o import { pensar } from "./pensar.ts").
 // A chave OLLAMA_API_KEY já foi lida do .env pelo bot.ts.
 
+// o formato de cada mensagem da conversa: quem falou ("user" = você, "assistant" = o bot) e o que falou
+export type Mensagem = { role: string; content: string };
+
 // "export" deixa outros arquivos usarem esta função; "async" porque lá dentro esperamos a internet
-export async function pensar(pergunta: string) {
+export async function pensar(conversa: Mensagem[]) {
 	// ---------- MANDAR PARA O MODELO ----------
 	// fetch já vem no Node: manda um pedido pela internet (aqui, para os computadores da Ollama Cloud)
 	const resposta = await fetch("https://ollama.com/v1/chat/completions", {
@@ -15,7 +18,7 @@ export async function pensar(pergunta: string) {
 		},
 		body: JSON.stringify({
 			model: "glm-5.3",
-			messages: [{ role: "user", content: pergunta }],
+			messages: conversa,    // mandamos TODAS as mensagens: é assim que o modelo "lembra"
 		}),
 	});
 

@@ -1,4 +1,4 @@
-// bot.ts - passo 10: o bot lê o que você escreveu, pergunta ao modelo e responde no Slack
+// bot.ts - passo 11: o bot conversa com o modelo e LEMBRA da conversa (enquanto estiver ligado)
 //
 // Como rodar (dentro da pasta passagens.ts/):   node bot.ts        (Ctrl+C para parar)
 
@@ -7,7 +7,7 @@
 import { App } from "@slack/bolt";
 
 // puxa a função pensar do NOSSO arquivo pensar.ts (o "./" quer dizer "aqui nesta mesma pasta")
-import { pensar } from "./pensar.ts";
+import { pensar, type Mensagem } from "./pensar.ts";
 
 // ---------- CHAVES ----------
 // lê o arquivo .env e guarda cada chave em process.env (depois esse process.env vai dar o valor da chave API em si ao process.env.SLACK_BOT_TOKEN
@@ -20,6 +20,11 @@ const app = new App({
 	socketMode: true,                      // o bot liga para o Slack, e não o contrário
 });
 
+// ---------- MEMÓRIA ----------
+// uma conversa por canal do Slack: a chave é o id do canal, o valor é a lista de mensagens daquele canal
+// shortcut: fica só na memória do programa (Ctrl+C apaga tudo); guardar em arquivo quando precisar sobreviver
+const conversas = new Map<string, Mensagem[]>();
+
 // ---------- RESPONDER ----------
 // toda vez que chegar uma mensagem, o Slack chama esta função
 app.message(async ({ message, say }) => {
@@ -30,8 +35,15 @@ app.message(async ({ message, say }) => {
 	if (texto === undefined) return;    // mensagem só com foto ou arquivo: não tem texto para mandar ao modelo
 	console.log("Chegou uma mensagem: " + texto);
 
-	const respostaDoModelo = await pensar(texto);
+	// pega a conversa deste canal; se ainda não existe, começa uma lista vazia
+	const conversa = conversas.get(message.channel) ?? [];
+	conversa.push({ role: "user", content: texto });
+
+	const respostaDoModelo = await pensar(conversa);
 	console.log("O modelo respondeu: " + respostaDoModelo);
+	conversa.push({ role: "assistant", content: respostaDoModelo });
+	conversas.set(message.channel, conversa);
+
 	await say(respostaDoModelo);
 
 });
