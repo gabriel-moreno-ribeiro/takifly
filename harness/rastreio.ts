@@ -6,7 +6,7 @@ import { CallbackHandler } from "@langfuse/langchain";
 import { LangfuseSpanProcessor } from "@langfuse/otel";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 
-process.loadEnvFile(import.meta.dirname + "/.env");
+process.loadEnvFile(import.meta.dirname + "/../.env");
 
 const ligado = Boolean(process.env.LANGFUSE_SECRET_KEY);
 const provedor = new NodeTracerProvider({ spanProcessors: ligado ? [new LangfuseSpanProcessor()] : [] });

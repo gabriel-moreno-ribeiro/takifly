@@ -1,4 +1,4 @@
-// bot.ts - os ouvidos e a boca do bot: recebe a mensagem no Slack, chama o grafo (agente.ts) e responde
+// bot.ts - os ouvidos e a boca do bot: recebe a mensagem no Slack, chama o grafo (harness/agente.ts) e responde
 //
 // Como rodar (dentro da pasta passagens.ts/):   node bot.ts        (Ctrl+C para parar)
 
@@ -6,8 +6,8 @@
 // puxa da biblioteca do Slack, as 21929129120 milhoes de bibliotecas para a biblioteca do slack funcionar e puxa apenas o que eu quero dela que é a parte de APP, ou seja, o bot em si, para ele nao apenas conseguir se conectar com o slack mas tambem conversar com ele
 import { App } from "@slack/bolt";
 
-// puxa a função responder do NOSSO arquivo agente.ts (o "./" quer dizer "aqui nesta mesma pasta")
-import { responder } from "./agente.ts";
+// puxa a função responder do NOSSO arquivo harness/agente.ts (o "./" quer dizer "aqui nesta mesma pasta")
+import { responder } from "./harness/agente.ts";
 
 // ---------- CHAVES ----------
 // lê o arquivo .env e guarda cada chave em process.env (depois esse process.env vai dar o valor da chave API em si ao process.env.SLACK_BOT_TOKEN

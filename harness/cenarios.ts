@@ -10,7 +10,7 @@
 //   pergunta:        a última resposta precisa ter uma pergunta
 //   semPreco:        a última resposta não pode citar preço nenhum
 
-import type { Voo } from "./voos.ts";
+import type { Voo } from "../voos.ts";
 
 // ---------- OS VOOS DE MENTIRA ----------
 export const BASE = [

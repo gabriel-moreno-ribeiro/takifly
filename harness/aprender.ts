@@ -1,16 +1,16 @@
 // aprender.ts - busca no Langfuse tudo o que deu errado e monta a lista do que melhorar no harness
 //
 // Lê duas coisas: as conversas com a nota "passou" igual a falso e as ferramentas que terminaram em erro.
-// Junta os erros parecidos, do mais frequente ao menos frequente, e salva em resultados/melhorias.md.
+// Junta os erros parecidos, do mais frequente ao menos frequente, e salva em harness/resultados/melhorias.md.
 // Este arquivo não muda o bot: quem decide a correção é uma pessoa, e a prova (avaliar.ts) confere se ela funcionou.
 //
-// Como rodar (dentro da pasta passagens.ts/):
-//   node aprender.ts                              desde que o Langfuse foi ligado neste projeto
-//   node aprender.ts 2026-11-01T00:00:00Z         desde essa data
+// Como rodar (dentro da pasta passagens.ts/, a de cima):
+//   node harness/aprender.ts                              desde que o Langfuse foi ligado neste projeto
+//   node harness/aprender.ts 2026-11-01T00:00:00Z         desde essa data
 
 import { mkdir, writeFile } from "node:fs/promises";
 
-process.loadEnvFile(import.meta.dirname + "/.env");
+process.loadEnvFile(import.meta.dirname + "/../.env");
 
 const LANGFUSE_LIGADO_EM = "2026-10-30T21:00:00Z";
 const desde = process.argv[2] ?? LANGFUSE_LIGADO_EM;
@@ -90,4 +90,4 @@ for (const [molde, { vezes, trace }] of [...errosParecidos].toSorted((a, b) => b
 await mkdir(import.meta.dirname + "/resultados", { recursive: true });
 await writeFile(import.meta.dirname + "/resultados/melhorias.md", partes.join("\n") + "\n");
 console.log(partes[0]);
-console.log("Lista completa em resultados/melhorias.md");
+console.log("Lista completa em harness/resultados/melhorias.md");

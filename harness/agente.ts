@@ -1,4 +1,4 @@
-// agente.ts - o cérebro do bot, montado como um grafo do LangGraph
+// harness/agente.ts - o cérebro do bot, montado como um grafo do LangGraph
 //
 // O caminho do grafo (só o nó "modelo" usa IA; todos os outros são código):
 //
@@ -7,8 +7,8 @@
 //                                                                  → recusou → volta para modelo (até 2 vezes)
 //                                                                  → recusou de novo → emergencia → planilha → END
 //
-// Para perguntar pelo terminal:   node agente.ts "voos de GRU para LIS em 12/12"
-// Para gerar o desenho:           node agente.ts       (depois: open agente.html)
+// Para perguntar pelo terminal:   node harness/agente.ts "voos de GRU para LIS em 12/12"
+// Para gerar o desenho:           node harness/agente.ts       (depois: open harness/agente.html)
 
 import { writeFile } from "node:fs/promises";
 
@@ -20,10 +20,10 @@ import { ChatOpenAI } from "@langchain/openai";
 import { type Caderno, descreverVoo, diaDaSemana, ferramentasDaEtapa, hojeEmSaoPaulo, limparArgumentos, resumirVoos, servicos, todasAsFerramentas } from "./ferramentas.ts";
 import { rastrear } from "./rastreio.ts";
 import { arrumarParaSlack, verificarResposta } from "./verificador.ts";
-import type { Voo } from "./voos.ts";
+import type { Voo } from "../voos.ts";
 
 // ---------- CHAVES ----------
-process.loadEnvFile(import.meta.dirname + "/.env");
+process.loadEnvFile(import.meta.dirname + "/../.env");
 
 // ---------- LIMITES ----------
 const LIMITE_DE_PASSOS = 8;       // quantas vezes o modelo pode ser chamado em um pedido
@@ -218,7 +218,7 @@ function depoisDeVerificar(estado: typeof Estado.State) {
 
 // ---------- GRAFO ----------
 // o SqliteSaver guarda a pasta num arquivo depois de cada nó: é a memória que sobrevive ao Ctrl+C
-const memoria = SqliteSaver.fromConnString(process.env.MEMORIA ?? import.meta.dirname + "/memoria.sqlite");
+const memoria = SqliteSaver.fromConnString(process.env.MEMORIA ?? import.meta.dirname + "/../memoria.sqlite");
 
 const grafo = new StateGraph(Estado)
 	.addNode("preparar", noPreparar)

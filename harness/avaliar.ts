@@ -3,14 +3,14 @@
 // O Google e a planilha são trocados por versões de mentira, então a prova é sempre igual e não cria nada no Drive.
 // A prova chama o modelo de verdade, então gasta crédito da Ollama.
 //
-// Como rodar (dentro da pasta passagens.ts/):
-//   node avaliar.ts                                  usa o modelo padrão
-//   MODELO=gpt-oss:20b node avaliar.ts               usa outro modelo
-//   node avaliar.ts cidade                           só os casos com "cidade" no nome
-//   PARTE=2/8 node avaliar.ts                        só a 2ª de 8 partes (para rodar vários ao mesmo tempo)
+// Como rodar (dentro da pasta passagens.ts/, a de cima):
+//   node harness/avaliar.ts                                  usa o modelo padrão
+//   MODELO=gpt-oss:20b node harness/avaliar.ts               usa outro modelo
+//   node harness/avaliar.ts cidade                           só os casos com "cidade" no nome
+//   PARTE=2/8 node harness/avaliar.ts                        só a 2ª de 8 partes (para rodar vários ao mesmo tempo)
 //
-// Cada resultado é salvo em resultados/<modelo>.jsonl assim que sai. Rodar de novo pula o que já terminou.
-// Para ver a comparação entre os modelos:   node comparar.ts
+// Cada resultado é salvo em harness/resultados/<modelo>.jsonl assim que sai. Rodar de novo pula o que já terminou.
+// Para ver a comparação entre os modelos:   node harness/comparar.ts
 
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 
@@ -213,7 +213,7 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 	},
 
 	// ---------- OS CASOS DIFÍCEIS ----------
-	// só estes:   node avaliar.ts dificil
+	// só estes:   node harness/avaliar.ts dificil
 
 	// faltou informação: o certo é perguntar, e não adivinhar
 	{

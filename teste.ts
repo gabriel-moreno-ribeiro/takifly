@@ -6,10 +6,10 @@ import assert from "node:assert";
 
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 
-import { cortarHistorico, noFerramentas } from "./agente.ts";
-import { dataFoiDita, entenderData, ferramentasDaEtapa, limparArgumentos, resolverAeroportos, servicos, todasAsFerramentas, type Caderno } from "./ferramentas.ts";
+import { cortarHistorico, noFerramentas } from "./harness/agente.ts";
+import { dataFoiDita, entenderData, ferramentasDaEtapa, limparArgumentos, resolverAeroportos, servicos, todasAsFerramentas, type Caderno } from "./harness/ferramentas.ts";
 import { montarAbas } from "./planilha.ts";
-import { arrumarParaSlack, verificarResposta } from "./verificador.ts";
+import { arrumarParaSlack, verificarResposta } from "./harness/verificador.ts";
 import { buscarVoos, lerPagina, montarTfs, precoEquivalente, type Voo } from "./voos.ts";
 
 // ---------- HISTÓRICO ----------

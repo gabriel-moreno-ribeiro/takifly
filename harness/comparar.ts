@@ -1,6 +1,6 @@
 // comparar.ts - lê resultados/*.jsonl e mostra a nota de cada modelo, por grupo e por cenário
 //
-// Como rodar (dentro da pasta passagens.ts/):   node comparar.ts
+// Como rodar (dentro da pasta passagens.ts/, a de cima):   node harness/comparar.ts
 
 import { readdir, readFile } from "node:fs/promises";
 

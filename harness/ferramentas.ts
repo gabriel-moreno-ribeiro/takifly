@@ -6,8 +6,8 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
-import { criarPlanilha, horas } from "./planilha.ts";
-import { buscarVoos, precoEquivalente, type Voo } from "./voos.ts";
+import { criarPlanilha, horas } from "../planilha.ts";
+import { buscarVoos, precoEquivalente, type Voo } from "../voos.ts";
 
 // ---------- SERVIÇOS DE FORA ----------
 // o que sai do Mac fica neste objeto para a prova (avaliar.ts) poder trocar por versões de mentira
