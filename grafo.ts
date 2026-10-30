@@ -2,6 +2,8 @@
 //
 // Como rodar (dentro da pasta passagens.ts/):   node grafo.ts
 
+import { writeFile } from "node:fs/promises";
+
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 
 // ---------- ESTADO ----------
@@ -28,3 +30,21 @@ const grafo = new StateGraph(Estado)
 // ---------- RODAR ----------
 const resultado = await grafo.invoke({ texto: "quero ir para lisboa" });
 console.log("No fim, a pasta tem: " + resultado.texto);
+
+// ---------- DESENHAR ----------
+// o LangGraph descreve o grafo em Mermaid, uma linguagem de desenhos feita de texto
+const desenho = await grafo.getGraphAsync();
+const textoDoDesenho = desenho.drawMermaid();
+console.log("\nO grafo escrito em Mermaid:\n" + textoDoDesenho);
+
+// grafo.html é uma página que baixa o programa Mermaid e desenha aí no seu navegador (nada do grafo sai do Mac)
+const pagina = `<!doctype html>
+<meta charset="utf-8">
+<title>Grafo</title>
+<pre class="mermaid">${textoDoDesenho}</pre>
+<script type="module">
+	import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+	mermaid.initialize({ startOnLoad: true });
+</script>`;
+await writeFile("grafo.html", pagina);
+console.log("Desenho salvo em grafo.html");
