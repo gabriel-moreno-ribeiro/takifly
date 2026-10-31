@@ -39,12 +39,12 @@ function enderecos(texto: string) {
 // ---------- A CONFERÊNCIA ----------
 // o modelo diz que vai fazer, mas não chama ferramenta nenhuma
 export function prometeuSemFazer(texto: string) {
-	return /\b(vou|irei|deixa eu|deixe-me|vou agora)\s+(pesquisar|buscar|procurar|consultar|verificar)|\baguarde\b|\bum momento\b/i.test(texto);
+	return /\b(vou|irei|deixa eu|deixe-me|vou agora)\s+(pesquisar|buscar|procurar|consultar|verificar)|\baguarde\b|\bum momento\b|\bpesquisando\b/i.test(texto);
 }
 
 // o modelo escreve a chamada de ferramenta como texto, em vez de chamar
 export function escreveuChamada(texto: string) {
-	return /"(name|arguments|parameters)"\s*:/.test(texto) || /<\/?tool_call>/.test(texto);
+	return /"(name|arguments|parameters)"\s*:/.test(texto) || /<\/?tool_call>|#[A-Z]+#|^```\s*\//m.test(texto);
 }
 
 const FALA_DO_USUARIO = /or[çc]amento|limite|at[ée]\s|dentro de|cupom|desconto|voc[êe] (tem|disse|falou|mencionou|informou)|seu amigo|n[ãa]o (posso|consigo|confirmo|[ée]|custa)|menos de|abaixo|acima|budget|under/i;
@@ -64,6 +64,12 @@ export function verificarResposta(texto: string, fatos: string, links: string, d
 		if (/monitoramento[^.\n]*(criad|ativ)|vou (te )?avisar|te aviso|estou monitorando|ficarei de olho|vou ficar de olho/i.test(linha) && !/Monitoramento #\d+ criado|#\d+: /.test(fatos)) problemas.push("Você disse que um monitoramento está ativo, mas nenhuma ferramenta confirmou. Diga que não foi criado e explique o que faltou.");
 		if (/guardei|anotei|salvei|vou lembrar|lembrarei|vou sempre considerar/i.test(linha) && !fatos.includes("Guardado:")) problemas.push("Você disse que guardou uma preferência, mas nenhuma ferramenta confirmou. Diga que não foi guardada.");
 	}
+
+	// o redator copiou o recado de outro agente, em vez de responder
+	if (/^\s*(pronto|done)\.?\s*$/i.test(texto)) problemas.push("\"Pronto\" não é uma resposta. Escreva para o usuário o resultado do pedido.");
+
+	// dizer que falhou sem ter falhado também é mentira: a pessoa tentaria de novo à toa
+	if (!/A BUSCA FALHOU|Erro:/.test(fatos) && /(pesquisa|busca)[^.\n]{0,40}falhou/i.test(texto)) problemas.push("Nenhuma pesquisa falhou. Responda com o que as ferramentas devolveram; se devolveram \"nenhum voo\", diga que não há voos.");
 
 	if (fatos.includes("A BUSCA FALHOU") && !/falh|erro|error|fail|problem|fehl|n[ãa]o consegui/i.test(texto)) problemas.push("Uma busca falhou, mas sua resposta não conta isso. Diga que a pesquisa falhou e peça para tentar de novo. Não diga que não há voos.");
 

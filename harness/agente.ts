@@ -134,7 +134,7 @@ async function noOrquestrador(estado: typeof Estado.State) {
 	const resposta = await modelo.bindTools([definirPlano], { tool_choice: "required" }).invoke(carta);
 	const chamada = resposta.tool_calls?.find((opcao) => opcao.name === "definir_plano");
 	const pedidos = Array.isArray(chamada?.args?.agentes) ? chamada.args.agentes : planoDoTexto(resposta.text, temVoos);
-	const plano = planoValido(pedidos, temVoos);
+	const plano = planoValido(pedidos);
 	console.log(`[orquestrador] ${JSON.stringify(plano)} em ${chamada?.args?.idioma ?? "?"}`);
 	return { plano, idioma: String(chamada?.args?.idioma ?? "") };
 }

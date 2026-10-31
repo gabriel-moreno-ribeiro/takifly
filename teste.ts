@@ -173,9 +173,8 @@ assert.equal(nomesDe("analista").includes("buscar_voos"), false);
 assert.equal(nomesDe("monitor").includes("buscar_voos"), false);
 
 // o código confere o plano do orquestrador: tira nome inventado e repetido, e põe na ordem certa
-assert.deepEqual(planoValido(["analista", "pesquisador", "pesquisador", "voos_search"], false), ["pesquisador", "analista"]);
-assert.deepEqual(planoValido(["analista"], false), []);    // sem voos, não há o que analisar
-assert.deepEqual(planoValido(["analista"], true), ["analista"]);
+assert.deepEqual(planoValido(["analista", "pesquisador", "pesquisador", "voos_search"]), ["pesquisador", "analista"]);
+assert.deepEqual(planoValido([]), []);
 assert.deepEqual(planoDoTexto("vou chamar o monitor", false), ["monitor"]);
 assert.deepEqual(planoDoTexto("hmm", false), ["pesquisador"]);
 assert.deepEqual(planoDoTexto("hmm", true), ["analista"]);
@@ -434,6 +433,12 @@ assert.equal(recusa("Dentro de R$ 4000 dá para o da Air Europa"), false);
 // busca que falhou precisa ser contada
 assert.equal(verificarResposta("Não encontrei voos", "BSB→LIS: A BUSCA FALHOU (captcha)", "").length, 1);
 assert.equal(verificarResposta("A pesquisa falhou, tente de novo", "BSB→LIS: A BUSCA FALHOU (captcha)", "").length, 0);
+
+// falha que não aconteceu, recado copiado e chamada escrita como texto
+assert.equal(verificarResposta("A pesquisa falhou, tente de novo", "GRU→ZZZ: nenhum voo encontrado.", "").length, 1);
+assert.equal(verificarResposta("pronto", "", "").length, 1);
+assert.equal(verificarResposta("#BUSCAR# destino=Lisboa", "", "").length, 1);
+assert.equal(verificarResposta("🔎 *Pesquisando* voos para você", "", "").length, 1);
 
 // dizer que fez sem ter feito
 assert.equal(verificarResposta("Monitoramento criado com sucesso!", "", "").length, 1);

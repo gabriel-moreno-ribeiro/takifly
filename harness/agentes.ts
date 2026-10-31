@@ -75,7 +75,7 @@ Há voos já pesquisados nesta conversa: ${temVoos ? "sim" : "não"}.
 
 Os agentes:
 - pesquisador: faz pesquisas novas de voos, inclusive quando o pedido muda a data, a cidade, os passageiros ou a classe.
-- analista: responde sobre voos já pesquisados: filtrar, comparar, somar.
+- analista: responde sobre voos já pesquisados (filtrar, comparar) e faz qualquer conta.
 - monitor: cria, mostra ou cancela o acompanhamento de um preço ao longo do tempo.
 - memoria: guarda, mostra ou apaga preferências do usuário.
 
@@ -84,6 +84,7 @@ Exemplos da última mensagem e do plano:
 "e no dia 13?" -> ["pesquisador"]
 "qual o mais rápido?" -> ["analista"]
 "só os diretos" -> ["analista"]
+"quanto é 2850 mais 3400?" -> ["analista"]
 "ida 12/12 e volta 20/12, quanto dá o total?" -> ["pesquisador", "analista"]
 "me avisa quando GRU-LIS baixar de R$ 2500" -> ["monitor"]
 "quais voos estou acompanhando?" -> ["monitor"]
@@ -95,10 +96,9 @@ Exemplos da última mensagem e do plano:
 Chame definir_plano sempre, com o idioma da última mensagem do usuário.`;
 }
 
-// o orquestrador é um modelo, então o código confere o plano: tira nomes inventados e repetidos e põe na ordem certa.
-// Sem voos e sem pesquisa, o analista não teria o que analisar.
-export function planoValido(agentes: string[], temVoos: boolean) {
-	return ORDEM.filter((nome) => agentes.includes(nome) && (nome !== "analista" || temVoos || agentes.includes("pesquisador")));
+// o orquestrador é um modelo, então o código confere o plano: tira nomes inventados e repetidos e põe na ordem certa
+export function planoValido(agentes: string[]) {
+	return ORDEM.filter((nome) => agentes.includes(nome));
 }
 
 // quando o orquestrador não chama definir_plano: procura os nomes no texto dele, e na falta deles, o caminho mais provável
@@ -117,7 +117,8 @@ export function instrucoesDoRedator(idioma: string, preferencias: string[], reca
 REGRAS
 1. Todo preço, horário, duração, companhia e link vem do resultado de uma ferramenta na conversa. Copie exatamente como veio: 16h40 continua 16h40, e horário fica em HH:MM. Nunca faça contas.
 2. Responda só ao que foi perguntado. Se um recado disser que faltou algo, pergunte isso ao usuário.
-3. Se uma busca falhou, diga que a pesquisa falhou e peça para tentar de novo. Nunca diga que não há voos nesse caso.
+3. Só se um resultado trouxer "A BUSCA FALHOU", diga que a pesquisa falhou e peça para tentar de novo. Se trouxer "nenhum voo", diga que não há voos. Se trouxer "Erro:", explique o que faltou e pergunte.
+   Os recados dos outros agentes são para você: nunca copie um recado como resposta.
 4. Os preços já são o total de todos os passageiros, em reais.
 5. "Custo-benefício" é o preço somado a R$ 30 por hora de viagem e R$ 200 por escala: quanto menor, melhor. Ao listar voos, cite o melhor além do mais barato.
 6. A planilha é criada pelo sistema depois da sua resposta: não prometa criar e não escreva link novo. Se pedirem o link de uma planilha anterior, copie da conversa.

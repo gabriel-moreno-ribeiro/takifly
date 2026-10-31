@@ -422,7 +422,10 @@ const filtrarVoos = tool(
 			.toSorted(ordens[filtro.ordenar_por]);
 		if (voos.length === 0) return "Nenhum dos voos pesquisados passa nesse filtro.";
 		const linhas = voos.slice(0, 10).map((voo) => `${nomeDoTrecho(voo)}: ${descreverVoo(voo)}`);
-		return `${voos.length} voos passam no filtro:\n${linhas.join("\n")}\nComprar: ${voos[0].link}`;
+		// a lista é cortada em 10: sem isto, o modelo diria que o décimo é o mais caro de todos
+		const caro = voos.toSorted((a, b) => b.preco - a.preco)[0];
+		const resto = voos.length > 10 ? `\nA lista mostra só 10. Mais caro de todos: ${nomeDoTrecho(caro)}: ${descreverVoo(caro)}` : "";
+		return `${voos.length} voos passam no filtro:\n${linhas.join("\n")}${resto}\nComprar: ${voos[0].link}`;
 	},
 	{
 		name: "filtrar_voos",
