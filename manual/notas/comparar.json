@@ -1,0 +1,86 @@
+{
+  "file": "harness/comparar.ts",
+  "blocks": [
+    {
+      "from": 1,
+      "to": 6,
+      "note": "Fifty lines that read the .jsonl files the exam wrote and print three tables. It talks to nothing and changes nothing, so it is free to run as often as you like. Pass a folder to read an older round instead of the current one, which is how you compare today against last week."
+    },
+    {
+      "from": 7,
+      "to": 10,
+      "note": "Only two imports, both file reading, and the folder from the first argument with the results folder as the default."
+    },
+    {
+      "from": 11,
+      "to": 20,
+      "note": "Loading. A Map of model to a Map of case to result. Because the files are append-only logs and each line is set by case name, a case that ran five times keeps only the last line, which is exactly the behaviour you want: the newest verdict wins without anyone cleaning up the file."
+    },
+    {
+      "from": 21,
+      "to": 25,
+      "note": "The models sorted, every case name any model ran, and the grouping function, which takes the part of a name before the first hyphen. That is why the cases in harness/cenarios.ts are named with a prefix: the prefix is the group, and it costs nothing to maintain."
+    },
+    {
+      "from": 26,
+      "to": 30,
+      "note": "The score for one model over a list of cases, as \"passed/total\", counting only the cases that model actually ran. That filter matters when a model ran half the exam: it reports 12/14 rather than pretending the missing ones failed."
+    },
+    {
+      "from": 31,
+      "to": 38,
+      "note": "The overall table: per model, the score, how many cases crashed outright, and the average seconds per case. Crashes are worth their own column because a model that breaks is a different problem from a model that answers badly. The padEnd calls are the entire layout engine."
+    },
+    {
+      "from": 39,
+      "to": 45,
+      "note": "The per-group table, one row per group and one column per model. This is the one to read after a change: it shows that a fix helped dates while quietly hurting filters, which a single overall number would hide completely."
+    },
+    {
+      "from": 46,
+      "to": 52,
+      "note": "The worst cases: for every case, which models failed it, keeping only those with at least one failure and sorting by how many failed. A case every model fails is usually a problem with the bot or with the case itself, and the top of this list is where to spend your next hour."
+    }
+  ],
+  "lines": {
+    "1": "What this file does: it reads the exam results from disk and prints a score table. It calls no model and costs nothing.",
+    "2": "An empty comment line.",
+    "3": "The how-to-run block starts. The parent folder matters because the default path below is relative to this file, not to you.",
+    "4": "With no argument it reads the current run.",
+    "5": "With an argument it reads an older folder, which is how you compare before and after a change.",
+    "7": "Two helpers from Node: list a folder, read a file.",
+    "9": "The folder to read. `process.argv[2]` is the first thing you typed after the filename, and `??` falls back to the default only when it is missing.",
+    "11": "Why the Map below is keyed by case name: running the same case twice should count once, as the newer result.",
+    "12": "Model name to (case name to result). A Map of Maps is enough here, so no class and no database.",
+    "13": "Walks every file in the folder. `await` is allowed at the top level because this is a module.",
+    "14": "Skips anything that is not a results file, so a stray note in the folder cannot break the run.",
+    "15": "Reads the whole file as text. These files are small, so there is no reason to stream them.",
+    "16": "One JSON object per line is the .jsonl format. `filter(Boolean)` drops the empty last line, and `JSON.parse` turns each line into a result.",
+    "17": "First result for a model: create its inner Map.",
+    "18": "Stores the result under its case name, which is what makes a second run of the same case overwrite the first. The `!` tells TypeScript the Map is there, since the line above just made sure of it.",
+    "22": "The model names, sorted, so the columns come out in a stable order. `toSorted` returns a new array instead of reordering this one.",
+    "23": "Every case name any model ran. The Set removes duplicates, which matters because different models may have run different slices.",
+    "24": "The group of a case is the part of its name before the first hyphen, which is why cases are named \"fala-girias\" and \"datas-passado\".",
+    "25": "The groups, in the order they first appear, so the table follows the case list rather than the alphabet.",
+    "27": "Scores one model over a list of cases, used for both the overall line and each group column.",
+    "28": "Looks up each case for that model and drops the ones it did not run, so a partial run still scores fairly.",
+    "29": "Returns \"passed/ran\" as text. Counting passes and dividing would hide how many cases actually ran.",
+    "32": "The first table: one line per model.",
+    "33": "Walks the models in the sorted order from line 22.",
+    "34": "All of that model's results.",
+    "35": "How many ended in a crash rather than a verdict, which is a different kind of bad than a wrong answer.",
+    "36": "Adds up the seconds. `reduce` is the standard way to fold a list into one number.",
+    "37": "Prints the line. `padEnd` pads with spaces so the columns line up in a terminal, and the average time is per case.",
+    "40": "The second table starts. `\\n` leaves a blank line before the heading.",
+    "41": "The header row: the word \"grupo\", then each model name cut to 12 characters so the columns stay the same width.",
+    "42": "One row per group.",
+    "43": "The cases in this group, found with the same prefix rule from line 24.",
+    "44": "The row itself: the group name, then that group's score for each model, padded to the same width as the header.",
+    "47": "The last table: where the models fail together, which is usually where the prompt or a tool is at fault rather than the model.",
+    "48": "Starts from every case.",
+    "49": "For each case, the models that failed it. `?.passou === false` is deliberate: a case a model never ran is undefined, and undefined is not a failure.",
+    "50": "Keeps only the cases somebody failed.",
+    "51": "Most failed first, so the top of the list is where to look.",
+    "52": "Prints how many models failed, the case name, and which models. A case that every model fails is almost always a bug in your code, not in theirs."
+  }
+}

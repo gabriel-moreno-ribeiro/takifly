@@ -1,0 +1,105 @@
+{
+  "file": "planilha.ts",
+  "blocks": [
+    {
+      "from": 1,
+      "to": 5,
+      "note": "The output side. It never talks to the Google Sheets API: you deployed the script in planilha_viva.gs inside your own spreadsheet, Apps Script gave it a web address, and this file posts to that address. Two consequences worth knowing. There are no Google credentials anywhere in this project, because the script runs as you. And planilha_viva.gs is a copy kept for reference, so editing it changes nothing until you paste it back into Apps Script."
+    },
+    {
+      "from": 6,
+      "to": 7,
+      "note": "precoEquivalente is the cost-benefit score defined in voos.ts (around line 27), and Voo is the flight shape from the same file. Importing a type with the \"type\" keyword tells Node it only exists for the type checker and vanishes at runtime."
+    },
+    {
+      "from": 8,
+      "to": 11,
+      "note": "1050 minutes becomes \"17h30\". A small function with a large footprint: it is used in the summary row, in every leg tab, and in descreverVoo in harness/ferramentas.ts. That last use is deliberate, and its comment records why: the model once turned \"1000 min\" into \"10h\", so durations are converted to hours by code before the AI ever sees them."
+    },
+    {
+      "from": 12,
+      "to": 20,
+      "note": "Grouping the flights by leg. The name is built from the route and the day and month cut straight out of the ISO date string, giving \"GRU->LIS 12/12\". The Map is filled the direct way: read what is there, or an empty list, and write it back with the new flight appended."
+    },
+    {
+      "from": 21,
+      "to": 30,
+      "note": "For each leg, the same list sorted three ways: by price, by duration and by cost-benefit. toSorted returns a new array rather than reordering the original, which matters because the same list is used four times here. The first element of each is the winner of that category."
+    },
+    {
+      "from": 31,
+      "to": 37,
+      "note": "The summary row for this leg, then the leg's own tab. The row carries the leg name, how many flights, the cheapest price with its airline and departure, the best-value price with its airline, and the fastest price with its duration. The tab has eight columns and one row per flight, cheapest first, with the duration already formatted and the cost-benefit number included so you can sort by it inside the spreadsheet."
+    },
+    {
+      "from": 38,
+      "to": 48,
+      "note": "The tabs come back with \"Resumo\" first and the per-leg tabs after it, which is the order they appear in the spreadsheet. Exported because teste.ts checks the result offline: the tab count, the summary row and the price ordering, with no network involved."
+    },
+    {
+      "from": 49,
+      "to": 54,
+      "note": "Reads the Apps Script address from the environment, which bot.ts or harness/agente.ts loaded from .env. Line 54 fails with a message naming the exact variable and file, because a missing setting is the most common reason this breaks and a vague error would cost you an afternoon."
+    },
+    {
+      "from": 55,
+      "to": 61,
+      "note": "One POST with the title and the tabs as JSON. The Apps Script reads that shape and creates a brand new spreadsheet per search rather than appending to one, which is why you can go back to an old link and still see those prices. Line 61 turns a non-OK status into an error naming the code."
+    },
+    {
+      "from": 62,
+      "to": 66,
+      "note": "The answer is parsed, and line 64 refuses to continue when there is no link. Returning something empty would be worse: the caller in harness/agente.ts would paste nothing into your answer and you would think the spreadsheet existed. The error travels back and gets appended to the answer instead, and the flights stay in \"novos\" so the next message tries again."
+    }
+  ],
+  "lines": {
+    "1": "What the file does: it turns a list of flights into a Google spreadsheet and gives you back the link.",
+    "2": "An empty comment line.",
+    "3": "Who does the real work: an Apps Script you deployed once, and its code is kept in planilha_viva.gs so it is not lost.",
+    "4": "How the two sides talk: the script is a URL kept in .env. This file sends it the tabs and gets a link back, so there is no Google login in the bot.",
+    "6": "Two things from voos.ts: `precoEquivalente`, which prices a stop as extra money, and the `Voo` type. `type` in the import says the second one exists only for TypeScript and disappears when the code runs.",
+    "8": "Turns minutes into something readable, exported because harness/ferramentas.ts formats durations the same way.",
+    "9": "The example is the clearest spec the function can have.",
+    "10": "Whole hours, then the leftover minutes. `padStart(2, \"0\")` is what makes 1050 come out as 17h30 instead of 17h3.",
+    "13": "A banner comment: shaping the tabs.",
+    "14": "The layout in one line: a Resumo tab with one row per leg, then one tab per leg with every flight.",
+    "15": "Exported separately from the sending below, which is what lets a test check the shape without calling Google.",
+    "16": "Groups the flights by leg: a name like \"GRU→LIS 12/03\" to the flights on it.",
+    "17": "Walks every flight once.",
+    "18": "Builds the leg name. `data.slice(8, 10)` is the day and `slice(5, 7)` the month, taken straight out of the 2026-03-12 text, so the tab reads as 12/03.",
+    "19": "Appends the flight to that leg. The spread copies the existing list, or an empty one on the first flight, which is why no `if` is needed.",
+    "22": "The rows of the Resumo tab, filled in the loop below.",
+    "23": "The per-leg tabs, kept apart so Resumo can be put first at line 40.",
+    "24": "Walks each leg, with its name and its flights.",
+    "25": "The same flights sorted by price. `toSorted` returns a new list, so the three orders below do not fight over one array.",
+    "26": "Sorted by how long the trip takes.",
+    "27": "Sorted by value, using the equivalent price, so a cheap flight with two stops stops looking like the obvious winner.",
+    "28": "The cheapest flight of the leg.",
+    "29": "The fastest.",
+    "30": "The best value.",
+    "32": "One Resumo row: the leg, how many flights, then the cheapest, the best value and the fastest, each with what makes it worth seeing.",
+    "33": "Adds this leg's own tab.",
+    "34": "The tab name, the same leg name used in Resumo so you can match the two by eye.",
+    "35": "The column headers, in the order the rows below are built.",
+    "36": "Every flight of the leg as a row, cheapest first, with the stop penalty and the duration already made readable.",
+    "40": "Returns the tabs. The order here is the order of the tabs in the spreadsheet.",
+    "41": "The Resumo tab object starts.",
+    "42": "Its name, which is the tab you want to land on first.",
+    "43": "Its headers, matching the row built at line 32 position by position.",
+    "44": "The rows collected in the loop.",
+    "46": "Then every per-leg tab, spread in after Resumo.",
+    "50": "A banner comment: creating the spreadsheet.",
+    "51": "What the function promises: a link on success, and a thrown error with a reason otherwise. harness/ferramentas.ts turns that error into something the bot can say.",
+    "52": "Takes the title and the flights. `Promise<string>` is the return type: async, giving back the link.",
+    "53": "The Apps Script address from .env.",
+    "54": "Fails immediately with a clear reason when it is missing, which beats a confusing network error further down.",
+    "56": "Posts to the script. `fetch` is built into Node, so this needs no library.",
+    "57": "POST, because the request carries data.",
+    "58": "Tells the script the body is JSON, which is what makes it parse rather than guess.",
+    "59": "The body: the title and the tabs from line 15. `JSON.stringify` turns the object into text to send.",
+    "61": "Any non-2xx reply becomes an error naming the status code, so a failure says something you can act on.",
+    "63": "Reads the reply as JSON.",
+    "64": "A reply with no link is a failure too, even with a 200 status, which is what an Apps Script error page looks like.",
+    "65": "Returns the link, which is what ends up in the Slack answer."
+  }
+}

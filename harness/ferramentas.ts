@@ -6,13 +6,15 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
-import { apagarPreferencia, cancelarMonitoramento, criarMonitoramento, guardarPreferencia, listarMonitoramentos, listarPreferencias, type Monitoramento } from "./dados.ts";
+import { descreverAeroporto, nomesDoAeroporto, resolverAeroportos, semAcento } from "./aeroportos.ts";
+import { apagarPreferencia, cancelarMonitoramento, criarMonitoramento, type Dossie, guardarDossie, guardarPreferencia, listarMonitoramentos, listarPreferencias, type Monitoramento } from "./dados.ts";
+import { buscarHospedagem, conferirPedido as conferirPedidoDeHospedagem, resumirHospedagens } from "./hospedagem.ts";
 import { criarPlanilha, horas } from "../planilha.ts";
 import { buscarVoos, precoEquivalente, type Voo } from "../voos.ts";
 
 // ---------- SERVIÇOS DE FORA ----------
 // o que sai do Mac fica neste objeto para a prova (avaliar.ts) poder trocar por versões de mentira
-export const servicos = { buscarVoos, criarPlanilha };
+export const servicos = { buscarVoos, buscarHospedagem, criarPlanilha };
 
 // ---------- O CADERNO ----------
 // o que as ferramentas leem e escrevem enquanto o nó "ferramentas" roda; no fim, o nó copia para o Estado do grafo
@@ -31,36 +33,10 @@ function cadernoDe(config: any): Caderno {
 const LIMITE_DE_BUSCAS = 12;    // um modelo em loop não pode martelar o Google
 
 // ---------- AEROPORTOS ----------
-const AEROPORTOS: Record<string, string[]> = {
-	"sao paulo": ["GRU", "CGH", "VCP"], "rio de janeiro": ["GIG", "SDU"], "rio": ["GIG", "SDU"], "belo horizonte": ["CNF"], "brasilia": ["BSB"],
-	"salvador": ["SSA"], "recife": ["REC"], "fortaleza": ["FOR"], "porto alegre": ["POA"], "curitiba": ["CWB"], "florianopolis": ["FLN"],
-	"natal": ["NAT"], "manaus": ["MAO"], "belem": ["BEL"], "goiania": ["GYN"], "maceio": ["MCZ"], "joao pessoa": ["JPA"], "vitoria": ["VIX"],
-	"foz do iguacu": ["IGU"], "campo grande": ["CGR"], "cuiaba": ["CGB"],
-	"lisboa": ["LIS"], "porto": ["OPO"], "madri": ["MAD"], "madrid": ["MAD"], "barcelona": ["BCN"], "paris": ["CDG", "ORY"], "londres": ["LHR", "LGW"],
-	"roma": ["FCO"], "milao": ["MXP"], "amsterda": ["AMS"], "frankfurt": ["FRA"], "berlim": ["BER"], "zurique": ["ZRH"], "dublin": ["DUB"],
-	"nova york": ["JFK", "EWR"], "miami": ["MIA"], "orlando": ["MCO"], "boston": ["BOS"], "los angeles": ["LAX"], "san francisco": ["SFO"], "chicago": ["ORD"],
-	"washington": ["IAD"], "toronto": ["YYZ"], "cidade do mexico": ["MEX"], "cancun": ["CUN"],
-	"buenos aires": ["EZE", "AEP"], "santiago": ["SCL"], "montevideu": ["MVD"], "lima": ["LIM"], "bogota": ["BOG"],
-	"toquio": ["HND", "NRT"], "dubai": ["DXB"], "joanesburgo": ["JNB"],
-
-	// apelidos e nomes em outras línguas: modelo fraco não sabe que Cumbica é GRU
-	"sp": ["GRU", "CGH", "VCP"], "guarulhos": ["GRU"], "cumbica": ["GRU"], "congonhas": ["CGH"], "viracopos": ["VCP"], "campinas": ["VCP"],
-	"rj": ["GIG", "SDU"], "galeao": ["GIG"], "tom jobim": ["GIG"], "santos dumont": ["SDU"], "bh": ["CNF"], "confins": ["CNF"],
-	"heathrow": ["LHR"], "gatwick": ["LGW"], "charles de gaulle": ["CDG"], "orly": ["ORY"], "barajas": ["MAD"], "fiumicino": ["FCO"],
-	"lisbon": ["LIS"], "lisbonne": ["LIS"], "lisbona": ["LIS"], "lissabon": ["LIS"], "london": ["LHR", "LGW"], "rome": ["FCO"], "new york": ["JFK", "EWR"], "tokyo": ["HND", "NRT"],
-};
-
-function semAcento(texto: string) {
-	return texto.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
-}
-
-// aceita cidade ou código: "São Paulo" -> GRU, CGH e VCP. O modelo não precisa decorar aeroporto nenhum.
-export function resolverAeroportos(texto: string) {
-	const achados = AEROPORTOS[semAcento(texto).replace(/^aeroporto (de |do |da )?/, "")];
-	if (achados) return achados;
-	if (/^[A-Za-z]{3}$/.test(texto.trim())) return [texto.trim().toUpperCase()];
-	throw new Error(`não conheço "${texto}". Passe o código de 3 letras do aeroporto; se não souber, pergunte. Não chute.`);
-}
+// quem conhece aeroporto é o aeroportos.ts: ele lê a tabela do mundo (OurAirports + Wikidata) e
+// entende nome de cidade em seis idiomas, erro de digitação e nome repetido. Aqui só re-exporto,
+// porque o resto do projeto e a prova pedem resolverAeroportos a este arquivo.
+export { resolverAeroportos };
 
 // ---------- DATAS ----------
 export function hojeEmSaoPaulo() {
@@ -88,7 +64,7 @@ export function diaDaSemana(data: string) {
 	return NOMES_DOS_DIAS[new Date(data + "T00:00:00Z").getUTCDay()];
 }
 
-function somarDias(data: string, dias: number) {
+export function somarDias(data: string, dias: number) {
 	return new Date(new Date(data + "T00:00:00Z").getTime() + dias * 86_400_000).toJSON().slice(0, 10);
 }
 
@@ -257,12 +233,16 @@ function conferirData(caderno: Caderno, texto: string) {
 	return data;
 }
 
-// a trava contra o lugar inventado: uma cidade que conhecemos precisa ter aparecido no que a pessoa escreveu
+// a trava contra o lugar inventado: o lugar precisa ter aparecido no que a pessoa escreveu.
+// Antes, um código fora da tabela escrita à mão PULAVA a trava, e aí o modelo podia enfiar qualquer
+// destino na busca. Agora a tabela é o mundo todo, então a trava vale sempre; só um código sem nome
+// de cidade cadastrado (67 aeroportos de 4133) passa reto, e aí quem confere é o Google.
 export function conferirLugar(caderno: Caderno, texto: string) {
 	const codigos = resolverAeroportos(texto);
-	const nomes = Object.keys(AEROPORTOS).filter((nome) => AEROPORTOS[nome].some((codigo) => codigos.includes(codigo)));
-	if (nomes.length === 0) return codigos;    // um código fora da nossa tabela: quem confere é o Google
-	const formas = [...nomes, ...codigos.map((codigo) => codigo.toLowerCase())];
+	const nomes = nomesDoAeroporto(codigos);
+	if (nomes.length === 0) return codigos;
+	// o nome vem de fonte de fora e pode ter "-", "." ou "(": sem escapar, viraria regex quebrada
+	const formas = [...nomes, ...codigos.map((codigo) => codigo.toLowerCase())].map((forma) => forma.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&"));
 	const foiDito = caderno.textosDoUsuario.some((pedido) => formas.some((forma) => new RegExp(`\\b${forma}\\b`).test(semAcento(pedido))));
 	if (!foiDito) throw new Error(`"${texto}" não aparece no pedido. Não escolha origem nem destino: pergunte.`);
 	return codigos;
@@ -294,11 +274,13 @@ function trechoNaMemoria(origem?: string, destino?: string, data?: string) {
 }
 
 // ---------- FERRAMENTAS PARA ENTENDER E BUSCAR ----------
+// a saída de emergência: quando o nome não resolveu sozinho, o modelo vê os candidatos com cidade,
+// país e tamanho do aeroporto e pergunta à pessoa qual é. Resolver errado calado é o que não pode.
 const buscarAeroportos = tool(
-	async ({ cidade }) => `${cidade}: ${resolverAeroportos(cidade).join(", ")}`,
+	async ({ cidade }) => `${cidade}: ${resolverAeroportos(cidade).map(descreverAeroporto).join(", ")}`,
 	{
 		name: "buscar_aeroportos",
-		description: "Diz os códigos dos aeroportos de uma cidade. Não precisa usar antes de buscar_voos, que já aceita o nome da cidade.",
+		description: "Diz os códigos dos aeroportos de uma cidade, com cidade, país e tamanho de cada um. Aceita o nome em qualquer idioma. Não precisa usar antes de buscar_voos, que já aceita o nome da cidade.",
 		schema: z.object({ cidade: z.string() }),
 	},
 );
@@ -575,7 +557,7 @@ const criarMonitoramentoFerramenta = tool(
 		const hoje = preco ? `Preço de agora: R$ ${preco.total}.` : "Agora não há voos nessa rota.";
 		const regra = alvo !== null ? `Aviso quando ficar em R$ ${alvo} ou menos.` : "Aviso quando aparecer o menor preço até agora.";
 		const comprar = preco ? `\nComprar: ${[preco.ida.link, preco.volta?.link].filter(Boolean).join(" e ")}` : "";
-		return `Monitoramento #${id} criado: ${descreverMonitoramento(trechos)}. ${hoje} ${jaEstaBom ? "Já está no preço que o usuário quer." : regra} Confere a cada 6 horas, enquanto o bot estiver ligado.${comprar}`;
+		return `Monitoramento #${id} criado: ${descreverMonitoramento(trechos)}. ${hoje} ${jaEstaBom ? "Já está no preço que o usuário quer." : regra} Confere a cada 2 horas, enquanto o bot estiver ligado.${comprar}`;
 	},
 	{
 		name: "criar_monitoramento",
@@ -659,12 +641,74 @@ const esquecerPreferencia = tool(
 	},
 );
 
+// ---------- HOSPEDAGEM ----------
+// mesmo desenho da busca de voos: o modelo escolhe a cidade e as datas, o código confere e pesquisa.
+// Os hotéis são reais (lidos do Google Hotels), mas a página só entrega o preço de UMA noite nas datas
+// que o Google escolhe, não das datas pedidas. Quem avisa isso é o resumirHospedagens, dentro do texto
+// que o modelo copia: o aviso mora junto do número, e não numa frase solta que o modelo pode largar.
+const buscarHospedagemFerramenta = tool(
+	async ({ cidade, entrada, saida, hospedes }, config) => {
+		const caderno = cadernoDe(config);
+		const diaDeEntrada = conferirData(caderno, entrada);
+		const diaDeSaida = conferirData(caderno, saida);
+		const problema = conferirPedidoDeHospedagem(cidade, diaDeEntrada, diaDeSaida, hospedes ?? 2);
+		if (problema) throw new Error(problema);
+		const achadas = await servicos.buscarHospedagem(cidade, diaDeEntrada, diaDeSaida, hospedes ?? 2);
+		return resumirHospedagens(achadas);
+	},
+	{
+		name: "buscar_hospedagem",
+		description: "Pesquisa hotéis reais numa cidade. O preço que vem é de uma noite nas datas do Google, não das datas pedidas. Use depois de saber as datas da viagem.",
+		schema: z.object({
+			cidade: z.string().describe("A cidade, como Lisboa"),
+			entrada: z.string().describe("A data de entrada como veio no pedido, como 12/12"),
+			saida: z.string().describe("A data de saída como veio no pedido, como 19/12"),
+			hospedes: z.number().optional().describe("Quantas pessoas no quarto, de 1 a 8"),
+		}),
+	},
+);
+
+// ---------- O DOSSIÊ DA PESSOA ----------
+// o nó das regras só confere visto, passaporte e vacina se souber estes dados; é esta ferramenta que
+// os guarda. Data aqui não passa pelo entenderData: aquele resolve data FUTURA ("próxima sexta"), e
+// data de nascimento é passado.
+function dataDeVerdade(valor: string) {
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) return false;
+	return new Date(valor + "T12:00:00Z").toISOString().slice(0, 10) === valor;
+}
+
+const guardarDossieFerramenta = tool(
+	async ({ nacionalidade, passaporte_validade, nascimento, vacina_febre_amarela }, config) => {
+		const { conversa } = cadernoDe(config);
+		const campos: Partial<Dossie> = {};
+		if (nacionalidade) campos.nacionalidade = nacionalidade.trim().toUpperCase().slice(0, 2);
+		for (const [nome, valor] of Object.entries({ passaporte_validade, nascimento, vacina_febre_amarela })) {
+			if (!valor) continue;
+			if (!dataDeVerdade(valor)) throw new Error(`${nome} tem que vir como AAAA-MM-DD, e "${valor}" não é uma data assim. Pergunte ao usuário e tente de novo.`);
+			campos[nome as "nascimento"] = valor;
+		}
+		if (Object.keys(campos).length === 0) throw new Error("não veio nenhum dado para guardar no dossiê.");
+		guardarDossie(conversa, campos);
+		return `Guardado no dossiê: ${Object.entries(campos).map(([nome, valor]) => `${nome} = ${valor}`).join(", ")}. As regras da viagem passam a usar isso.`;
+	},
+	{
+		name: "guardar_dossie",
+		description: "Guarda os documentos do usuário: validade do passaporte, data de nascimento, data da vacina de febre amarela e nacionalidade. Serve para conferir visto, passaporte e vacina da viagem.",
+		schema: z.object({
+			nacionalidade: z.string().optional().describe("Sigla de dois caracteres, como BR"),
+			passaporte_validade: z.string().optional().describe("Até quando o passaporte vale, como AAAA-MM-DD"),
+			nascimento: z.string().optional().describe("Data de nascimento, como AAAA-MM-DD"),
+			vacina_febre_amarela: z.string().optional().describe("Data da dose da vacina, como AAAA-MM-DD"),
+		}),
+	},
+);
+
 // ---------- O CARDÁPIO ----------
 // cada grupo pertence a um agente só (agentes.ts): quanto menos opções, menos um modelo fraco se confunde
-export const paraPesquisar = [buscarVoosFerramenta, buscarVariosDias, buscarAeroportos, entenderDataFerramenta];
+export const paraPesquisar = [buscarVoosFerramenta, buscarVariosDias, buscarHospedagemFerramenta, buscarAeroportos, entenderDataFerramenta];
 export const paraAnalisar = [filtrarVoos, melhoresVoos, combinarIdaEVolta, calcular, diferencaDeDuracao, listarPesquisas];
 export const paraMonitorar = [criarMonitoramentoFerramenta, listarMonitoramentosFerramenta, cancelarMonitoramentoFerramenta];
-export const paraLembrar = [lembrarPreferencia, verPreferencias, esquecerPreferencia];
+export const paraLembrar = [lembrarPreferencia, verPreferencias, esquecerPreferencia, guardarDossieFerramenta];
 export const todasAsFerramentas = [...paraPesquisar, ...paraAnalisar, ...paraMonitorar, ...paraLembrar];
 
 // modelos fracos mandam null ou "" nos campos opcionais; para o código isso é o mesmo que não mandar

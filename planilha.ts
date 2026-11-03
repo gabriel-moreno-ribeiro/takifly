@@ -2,6 +2,9 @@
 //
 // Quem cria a planilha é o Apps Script que você já implantou (a cópia do código está em planilha_viva.gs).
 // Ele é um endereço na internet (PLANILHA_VIVA_URL, no .env): mandamos as abas e ele devolve o link.
+//
+// São dois usos: a pesquisa do bot cria uma planilha nova (criarPlanilha), e o monitor volta na mesma
+// planilha a cada checagem para acrescentar o preço de agora (atualizarPlanilha).
 
 import { precoEquivalente, type Voo } from "./voos.ts";
 
@@ -47,16 +50,25 @@ export function montarAbas(voos: Voo[]) {
 	];
 }
 
-// ---------- CRIAR A PLANILHA ----------
-// devolve o link da planilha nova; se algo der errado, lança um erro com a explicação
-export async function criarPlanilha(titulo: string, voos: Voo[]): Promise<string> {
+// ---------- FALAR COM O APPS SCRIPT ----------
+// uma aba do jeito que o Apps Script espera. "modo" só existe na planilha viva:
+// acrescentar = empurra as linhas para o fim da aba (o histórico), reescrever = joga a aba fora e põe esta (o resumo).
+export type Aba = {
+	nome: string;
+	colunas: string[];
+	linhas: unknown[][];
+	modo?: "acrescentar" | "reescrever";
+};
+
+// devolve o link da planilha; se algo der errado, lança um erro com a explicação
+async function mandarAoAppsScript(corpo: object): Promise<string> {
 	const endereco = process.env.PLANILHA_VIVA_URL;
 	if (!endereco) throw new Error("falta PLANILHA_VIVA_URL no arquivo .env");
 
 	const resposta = await fetch(endereco, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ titulo, abas: montarAbas(voos) }),
+		body: JSON.stringify(corpo),
 	});
 	if (!resposta.ok) throw new Error("o Google respondeu com erro " + resposta.status);
 
@@ -64,3 +76,20 @@ export async function criarPlanilha(titulo: string, voos: Voo[]): Promise<string
 	if (!dados.link) throw new Error("o Google não devolveu o link da planilha");
 	return dados.link;
 }
+
+// ---------- CRIAR A PLANILHA ----------
+// sem "planilha" no pedido, o Apps Script cria uma nova. É o que a pesquisa do bot sempre fez.
+export async function criarPlanilha(titulo: string, voos: Voo[]): Promise<string> {
+	return mandarAoAppsScript({ titulo, abas: montarAbas(voos) });
+}
+
+// ---------- ATUALIZAR UMA PLANILHA QUE JÁ EXISTE ----------
+// planilha = o link (ou o id) de uma planilha que já existe. Passando null, o Apps Script cria a primeira
+// e devolve o link: é assim que o monitor ganha a planilha dele sem precisar de um passo separado.
+export async function atualizarPlanilha(planilha: string | null, titulo: string, abas: Aba[]): Promise<string> {
+	return mandarAoAppsScript({ titulo, planilha, abas });
+}
+
+// o mesmo molde do "servicos" em harness/ferramentas.ts: o teste troca esta função por uma de mentira
+// para não falar com o Google de verdade.
+export const servicos = { atualizarPlanilha };

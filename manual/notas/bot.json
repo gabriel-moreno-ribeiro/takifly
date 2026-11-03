@@ -1,0 +1,172 @@
+{
+  "file": "bot.ts",
+  "blocks": [
+    {
+      "from": 1,
+      "to": 4,
+      "note": "The whole file is plumbing. No AI call happens here, and nothing decides anything. It is 80 lines on purpose: you can read all of it before trusting it. Start it with \"node bot.ts\" from inside the passagens.ts folder, and stop it with Ctrl+C."
+    },
+    {
+      "from": 5,
+      "to": 7,
+      "note": "App is Slack's own class, from the @slack/bolt package. It handles the connection, the reconnects and the parsing of each event, and hands you one plain function per message. Everything else from that package stays unused."
+    },
+    {
+      "from": 8,
+      "to": 10,
+      "note": "The single door into the brain. responder is defined at the bottom of harness/agente.ts (around line 374 there) and takes a conversation id, your text and a progress callback. Nothing else in the graph is reachable from here, which is why the brain can be rewritten without touching this file."
+    },
+    {
+      "from": 11,
+      "to": 13,
+      "note": "ligarMonitor is defined in harness/monitor.ts (around line 82). It starts the clock that re-prices your watched routes, and it is the only thing in the project that makes the bot speak without being asked."
+    },
+    {
+      "from": 14,
+      "to": 17,
+      "note": "Node reads the .env file and copies each KEY=value line into process.env, which is what makes the next lines work. Watch the relative path: \".env\" means the folder you ran the command from, so this line only works when you start the bot from inside passagens.ts. The other files use import.meta.dirname instead, which does not care where you are."
+    },
+    {
+      "from": 18,
+      "to": 24,
+      "note": "The Slack connection, and three settings worth knowing. token is the bot's own badge (xoxb-...), what it posts as. appToken (xapp-...) is the permission to open a socket from your Mac. socketMode: true is the one that matters most: your Mac dials out to Slack instead of Slack calling in, so you need no public address, no tunnel and no server. That single line is why this bot can run on a laptop."
+    },
+    {
+      "from": 25,
+      "to": 28,
+      "note": "A Map from a channel id to the promise of whatever is currently running in that channel. It exists because the conversation memory for a channel is one saved record (harness/agente.ts sets that up around line 302). Two requests at once would both load the same state, both write it back, and one would be lost."
+    },
+    {
+      "from": 29,
+      "to": 35,
+      "note": "The queue, in five lines. Read the promise currently queued for this channel, or an already-finished one if there is none. Chain the new work onto it, store the result back as the new tail, and return it so the caller can await its turn. The detail that makes it reliable is .then(trabalho, trabalho): the same function is passed as both the success and the failure handler, so if the previous request threw, the next one still runs instead of the queue jamming forever."
+    },
+    {
+      "from": 36,
+      "to": 38,
+      "note": "Slack sometimes delivers the same event twice, and \"ts\" (the timestamp) is each message's unique id. Without this Set, a duplicate delivery would cost you a second full model run and a second answer. It lives only in memory, so restarting the bot forgets what it has seen."
+    },
+    {
+      "from": 39,
+      "to": 42,
+      "note": "app.message registers the handler: Slack calls this function for every message it sends you. The three things it hands over are the message itself, say (post into the same channel) and client (the full Slack API, used further down to edit and delete)."
+    },
+    {
+      "from": 43,
+      "to": 44,
+      "note": "The first filter. Edits, deletions, joins and pinned messages all arrive as messages carrying a \"subtype\", and only a plain human message has none. Anything with a subtype is dropped here, which is what stops the bot answering its own edit events."
+    },
+    {
+      "from": 45,
+      "to": 47,
+      "note": "A message with no text at all is what a photo or a file upload looks like. There would be nothing to send the model, so it returns early rather than calling the brain with undefined."
+    },
+    {
+      "from": 48,
+      "to": 51,
+      "note": "The duplicate check, then recording the id, in that order. After this point the message is accepted, and the log line is your first sign of life in the terminal."
+    },
+    {
+      "from": 52,
+      "to": 52,
+      "note": "From here on, the work runs inside that channel's queue. The await means this handler waits its turn, so if you send three messages quickly, they are answered in order instead of trampling each other."
+    },
+    {
+      "from": 53,
+      "to": 56,
+      "note": "Posts the placeholder you see immediately, so you know the bot is alive while the model thinks. Keeping aviso.ts matters: that timestamp is the only way to edit or delete that exact message later. The ! tells TypeScript the value is there, since Slack types it as optional."
+    },
+    {
+      "from": 57,
+      "to": 63,
+      "note": "The real call into the brain. The channel id doubles as the conversation key, which is what gives every Slack channel its own separate memory. The third argument is the progress callback: the brain calls it whenever a tool starts, and it edits the placeholder in place rather than posting a new message. The .catch(console.log) is deliberate, and the comment above it says why: if editing the note fails, the request carries on, because the note is decoration."
+    },
+    {
+      "from": 64,
+      "to": 65,
+      "note": "The answer is logged and posted. Everything the user ever sees comes out of these two lines."
+    },
+    {
+      "from": 66,
+      "to": 69,
+      "note": "The error path. Any exception from the brain becomes a readable Slack message containing erro.message plus \"send it again, I pick up where I left off\". That second half is literally true: the state was saved after every step, so a retry resumes the unfinished request instead of starting over. The resuming itself happens in harness/agente.ts (around line 368)."
+    },
+    {
+      "from": 70,
+      "to": 72,
+      "note": "Cleanup: the placeholder is deleted whether the request worked or failed, since this line sits after the try/catch rather than inside it. Again with .catch, because a failed cleanup must not turn a good answer into an error."
+    },
+    {
+      "from": 73,
+      "to": 76,
+      "note": "app.start() opens the socket to Slack, and nothing before this line could have received a message. Top-level await works because package.json sets \"type\": \"module\". After it prints, the process stays alive on its own, held open by the socket."
+    },
+    {
+      "from": 77,
+      "to": 80,
+      "note": "The last line starts the price watcher and hands it a way to speak: a function that posts to whichever channel it names. The watcher stores the channel with each watch, so an alert lands in the conversation that asked for it. This is the one place where output is not a reply to anything."
+    }
+  ],
+  "lines": {
+    "1": "What the file is: the ears and the mouth. It takes a Slack message, hands it to the graph in harness/agente.ts, and posts what comes back. Nothing in here thinks.",
+    "2": "An empty comment line.",
+    "3": "How to run it, and how to stop it. The relative path on line 17 is why you have to be inside the project folder.",
+    "5": "A banner comment: the imports.",
+    "6": "Your own note on what an import is: Slack's library is huge, and you pull out only the piece you need.",
+    "7": "`App` is Slack's own class. It handles the connection and hands you one callback per message, which is everything lines 42 to 72 rely on.",
+    "9": "A reminder of what \"./\" means: a file of yours, in this same folder, not a package from the internet.",
+    "10": "Brings in `responder`, defined at the bottom of harness/agente.ts. It is the single door into the brain, so this is the only place the two halves meet.",
+    "12": "What the watcher is, in one line: a clock that checks prices without being asked.",
+    "13": "Brings in `ligarMonitor` from harness/monitor.ts, started at the very end of this file.",
+    "15": "A banner comment: the keys.",
+    "16": "Your own note on how .env works: the file is read once and each key lands in `process.env`.",
+    "17": "Reads .env and copies every line into `process.env`, which is what makes the next lines work. The path is relative, so it only finds the file when you run the bot from the project folder.",
+    "19": "A banner comment: the connection itself.",
+    "20": "Creates the app with three settings. This object is the only thing in the file that knows how to reach Slack.",
+    "21": "The bot's own badge, `xoxb-...`. Everything it posts is posted as this identity.",
+    "22": "The permission to open a connection from your Mac, `xapp-...`. It is a second token because it grants a different thing: connecting, not posting.",
+    "23": "The setting that lets this run on a laptop: your Mac dials out to Slack, so Slack never has to reach you and you need no public address and no tunnel.",
+    "26": "A banner comment: the queue.",
+    "27": "Why the queue exists: a channel's memory is one saved record, so two requests at once would both load it, both save, and one would lose its changes.",
+    "28": "Channel id to the promise of the work already queued for it. A Map in memory is enough, because a restart has no requests in flight anyway.",
+    "30": "Takes the channel and the work to do, and returns the promise of that work once it reaches the front of the line.",
+    "31": "The promise already queued for this channel, or an already-finished one when the channel is idle, which is what makes the first request start immediately.",
+    "32": "The line that makes the queue work. `.then(trabalho, trabalho)` passes the same function as both the success and the failure handler, so a request that blew up does not block the next one.",
+    "33": "Stores the new tail of the queue, so the next message chains onto this one instead of the one before.",
+    "34": "Hands the promise back, which is what the `await` on line 52 waits for.",
+    "37": "Why the Set below exists: Slack sometimes delivers the same event twice, and the `ts` timestamp is each message's unique id.",
+    "38": "The ids already handled. It lives in memory, so restarting the bot forgets them, which is fine: a duplicate only arrives within seconds.",
+    "40": "A banner comment: answering.",
+    "41": "What `app.message` is: the callback Slack runs for every message it delivers.",
+    "42": "Registers that callback. Of everything Slack hands over, three pieces are used: `message` is the event, `say` posts into the same channel, and `client` is the full API, needed to edit and delete.",
+    "43": "Why the next line checks a subtype: edited, deleted and joined-channel events all carry one, and a plain message does not.",
+    "44": "Drops everything that is not a plain message. Returning early is cheaper and safer than trying to understand an event you do not handle.",
+    "46": "The message text.",
+    "47": "Drops a message with no text, which is what a photo or a file upload looks like: there would be nothing to send the model.",
+    "48": "The duplicate check, before anything expensive happens. Without it a double delivery costs you a second full model run.",
+    "49": "Records the id. The order matters: check first, then remember, then work.",
+    "50": "Prints the incoming text, which is the log you watch while testing.",
+    "52": "From here on, the work runs inside the channel's queue. Everything inside this function is one request.",
+    "53": "What the next line is for: a message that gets edited while the bot works and is deleted at the end.",
+    "54": "Posts the placeholder. `say` returns what Slack stored, which is how the next lines know which message to edit.",
+    "55": "The channel id, pulled out once because the three API calls below all need it.",
+    "56": "The placeholder's timestamp, which is its id. The `!` tells TypeScript it is really there, since Slack only omits it when the post failed.",
+    "58": "Opens the guarded part: everything that can fail is inside it, so a crash still reaches the person who asked.",
+    "59": "Why the channel id is the memory key: each Slack channel is a separate conversation with its own saved state.",
+    "60": "The real call into the brain, with the conversation key, the text, and a function to call with progress updates.",
+    "61": "Why the next line swallows its error: the progress note is decoration, so a failure to edit it must not kill the request.",
+    "62": "Edits the placeholder with whatever the brain reports. `.catch(console.log)` logs the failure and lets the request carry on.",
+    "64": "Prints the answer, so the terminal holds the same thing Slack does.",
+    "65": "Posts the real answer.",
+    "66": "Catches anything the brain threw. `erro: any` is the lazy type: all that is used below is `.message`.",
+    "67": "Logs the whole error, with its stack, which is what you actually need to debug it.",
+    "68": "Tells the person what broke and that they can retry. The second half is true because harness/agente.ts saves the state after each step, so a retry resumes instead of starting over.",
+    "70": "Removes the placeholder, outside the try so it happens whether the request worked or failed, and with its own `.catch` so a failed cleanup cannot break anything.",
+    "74": "A banner comment: starting up.",
+    "75": "Opens the socket to Slack. Top-level `await` works because package.json sets \"type\": \"module\".",
+    "76": "Prints that the bot is up, which is the line you wait for before testing in Slack.",
+    "78": "A banner comment: the watcher.",
+    "79": "The one place the bot speaks without being asked: the alert goes to the channel where the watch was created.",
+    "80": "Starts the watcher and hands it a way to speak. The watcher knows which conversation to post to but nothing about Slack, so it calls this function instead."
+  }
+}

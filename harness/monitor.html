@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Grafo do monitor</title>
+<pre class="mermaid">%%{init: {'flowchart': {'curve': 'linear'}}}%%
+graph TD;
+	__start__(<p>__start__</p>)
+	encerrar(encerrar)
+	buscar(buscar)
+	falhou(falhou)
+	registrar(registrar)
+	decidir(decidir)
+	avisar(avisar)
+	__end__(<p>__end__</p>)
+	avisar --> __end__;
+	buscar --> registrar;
+	encerrar --> __end__;
+	falhou --> __end__;
+	registrar --> decidir;
+	__start__ -.-> encerrar;
+	__start__ -.-> buscar;
+	__start__ -.-> __end__;
+	decidir -.-> avisar;
+	decidir -.-> __end__;
+	buscar -.-> falhou;
+	classDef default fill:#f2f0ff,line-height:1.2;
+	classDef first fill-opacity:0;
+	classDef last fill:#bfb6fc;
+</pre>
+<script type="module">
+	import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+	mermaid.initialize({ startOnLoad: true });
+</script>

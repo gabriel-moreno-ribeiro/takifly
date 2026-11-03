@@ -2,9 +2,10 @@
 //
 // O caminho do grafo:
 //
-//   START → preparar → orquestrador → especialistas do plano, um de cada vez → redator → verificar
+//   START → preparar → orquestrador → especialistas do plano, um de cada vez → conferir → redator → verificar
 //
 //   especialistas (memoria, monitor, pesquisador, analista): cada um repete "modelo ⇄ ferramentas" até terminar a sua tarefa
+//   conferir: código, sem IA. Vê visto, passaporte, vacina e menor de idade, e deixa o problema como recado
 //   verificar → aprovou → planilha → END
 //             → recusou → volta para redator (até 2 vezes)
 //             → recusou de novo → emergencia → planilha → END
@@ -23,11 +24,12 @@ import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { ChatOpenAI } from "@langchain/openai";
 
 import { AGENTES, definirPlano, instrucoesDoOrquestrador, instrucoesDoRedator, type NomeDoAgente, planoDoTexto, planoValido } from "./agentes.ts";
-import { listarPreferencias } from "./dados.ts";
+import { type Dossie, lerDossie, listarPreferencias } from "./dados.ts";
 import { type Caderno, descreverVoo, limparArgumentos, resumirVoos, servicos } from "./ferramentas.ts";
+import { conferirViagem, paisDoAeroporto, type Trecho, type Viagem } from "./regras.ts";
 import { anotar, rastrear } from "./rastreio.ts";
 import { arrumarParaSlack, escreveuChamada, prometeuSemFazer, verificarResposta } from "./verificador.ts";
-import type { Voo } from "../voos.ts";
+import { REGRA_DO_CUSTO_BENEFICIO, type Voo } from "../voos.ts";
 
 // ---------- CHAVES ----------
 process.loadEnvFile(import.meta.dirname + "/../.env");
@@ -139,18 +141,39 @@ async function noOrquestrador(estado: typeof Estado.State) {
 	return { plano, idioma: String(chamada?.args?.idioma ?? "") };
 }
 
+// ---------- O QUE CONTA COMO FATO ----------
+// só o retorno de uma ferramenta, mais o que já está pesquisado. Serve ao verificador e ao recado.
+function fatosDoPedido(estado: typeof Estado.State) {
+	const doPedido = estado.messages.slice(estado.messages.findLastIndex((mensagem) => mensagem.getType() === "human"));
+	const retornos = doPedido.filter((mensagem) => mensagem.getType() === "tool").map((mensagem) => mensagem.text);
+	return [...retornos, ...estado.voos.map(descreverVoo), REGRA_DO_CUSTO_BENEFICIO].join("\n");
+}
+
+// o recado do especialista vai inteiro para as instruções do redator, e o verificador só olha a resposta
+// final: sem isto, um preço inventado na nota de um especialista vira fato na boca do redator.
+function recadoConferido(nome: string, recado: string, estado: typeof Estado.State) {
+	const fatos = fatosDoPedido(estado);
+	const problemas = verificarResposta(recado, fatos, fatos, textosDoUsuario(estado.messages).join("\n"));
+	if (problemas.length === 0) return recado;
+	console.log(`[${nome}] recado recusado: ${problemas.join(" / ")}`);
+	return "não terminou: a nota deste especialista trouxe dado que não veio de ferramenta, e foi descartada";
+}
+
 // ---------- NÓS: ESPECIALISTAS ----------
 // todo especialista funciona igual: lê o pedido, chama as suas ferramentas e, quando termina, deixa um recado e sai do plano
 function criarEspecialista(nome: NomeDoAgente) {
 	const { ferramentas, instrucoes } = AGENTES[nome];
 
 	return async (estado: typeof Estado.State, config: LangGraphRunnableConfig) => {
-		const sair = (recado: string) => ({
-			plano: estado.plano.slice(1),
-			passosDoAgente: 0,
-			correcao: "",
-			recados: recado && !/^pronto\.?$/i.test(recado.trim()) ? [...estado.recados, `${nome}: ${recado}`] : estado.recados,
-		});
+		const sair = (recado: string) => {
+			const conferido = recado && !/^pronto\.?$/i.test(recado.trim()) ? recadoConferido(nome, recado, estado) : "";
+			return {
+				plano: estado.plano.slice(1),
+				passosDoAgente: 0,
+				correcao: "",
+				recados: conferido ? [...estado.recados, `${nome}: ${conferido}`] : estado.recados,
+			};
+		};
 		if (estado.passosDoAgente >= PASSOS_POR_AGENTE || estado.passos >= PASSOS_POR_PEDIDO) return sair("não terminou: chegou ao limite de passos");
 
 		const preferencias = preferenciasDe(config);
@@ -212,6 +235,94 @@ export async function noFerramentas(estado: typeof Estado.State, config?: LangGr
 	};
 }
 
+// ---------- NÓ: CONFERIR AS REGRAS DA VIAGEM ----------
+// Um Voo nosso é um trecho inteiro, com as escalas somadas dentro dele, e estado.voos guarda TODAS as
+// opções pesquisadas, não a viagem escolhida. Então aqui monta-se a viagem mais simples que dá para
+// afirmar: a ida mais barata do primeiro dia e a volta mais barata do último.
+//
+// shortcut: as regras de conexão e de bagagem ficam de fora, porque a busca não traz trecho por trecho;
+// as de visto, passaporte, vacina e menor de idade não dependem disso. Quando a busca trouxer cada
+// perna do voo, é só preencher mais trechos aqui — o regras.ts já sabe conferir conexão.
+function maisMinutos(quando: string, minutos: number) {
+	const data = new Date(quando + ":00Z");
+	data.setUTCMinutes(data.getUTCMinutes() + minutos);
+	return data.toISOString().slice(0, 16);
+}
+
+function comoTrecho(voo: Voo): Trecho {
+	const partida = `${voo.data}T${voo.saida}`;
+	return { origem: voo.origem, destino: voo.destino, partida, chegada: maisMinutos(partida, voo.duracao_min), companhia: voo.companhia };
+}
+
+export function viagemDosVoos(voos: Voo[], dossie: Dossie | null): Viagem | null {
+	if (voos.length === 0) return null;
+	const paisDeCasa = paisDoAeroporto(voos[0].origem) || "BR";
+	// viagem dentro do país não tem visto, passaporte nem vacina para conferir: o nó fica calado
+	const foraDeCasa = voos.find((voo) => paisDoAeroporto(voo.destino) && paisDoAeroporto(voo.destino) !== paisDeCasa);
+	if (!foraDeCasa) return null;
+
+	const maisBarato = (dia: string) => voos.filter((voo) => voo.data === dia).toSorted((a, b) => a.preco - b.preco)[0];
+	const dias = [...new Set(voos.map((voo) => voo.data))].toSorted();
+	const ida = maisBarato(dias[0])!;
+	const volta = dias.length > 1 ? maisBarato(dias.at(-1)!) : undefined;
+	const dias_de_permanencia = volta ? Math.round((Date.parse(volta.data) - Date.parse(ida.data)) / 86_400_000) : undefined;
+
+	return {
+		viajantes: [{
+			nacionalidade: dossie?.nacionalidade ?? "BR",
+			passaporte_validade: dossie?.passaporte_validade ?? undefined,
+			nascimento: dossie?.nascimento ?? undefined,
+			vacina_febre_amarela: dossie?.vacina_febre_amarela ?? undefined,
+		}],
+		trechos: volta ? [comoTrecho(ida), comoTrecho(volta)] : [comoTrecho(ida)],
+		pais_destino: paisDoAeroporto(foraDeCasa.destino),
+		motivo: "turismo",
+		dias_de_permanencia,
+	};
+}
+
+// o nó não fala com a pessoa: ele deixa a lista como recado, e o redator explica. É a mesma porta por
+// onde os especialistas falam com o redator, então nada de novo precisou entrar no Estado.
+// o que o redator precisa saber das regras desta viagem. null = não há viagem para conferir.
+// Exportado para a prova: a decisão de quando calar mora aqui, e o nó é só cola.
+export function regrasDaViagem(voos: Voo[], dossie: Dossie | null, hoje?: string) {
+	const viagem = viagemDosVoos(voos, dossie);
+	if (!viagem) {
+		// aeroporto fora da tabela não pode virar silêncio: "não conferi" é honesto, e afirmar que
+		// precisa de visto seria chute, porque pode ser um aeroporto brasileiro que não listamos.
+		const desconhecidos = [...new Set(voos.map((voo) => voo.destino).filter((destino) => !paisDoAeroporto(destino)))];
+		if (desconhecidos.length === 0) return null;    // viagem dentro do país: não há regra para conferir
+		return { avisos: [], recadoExtra: `não conheço o aeroporto ${desconhecidos.join(", ")}, então NÃO conferi visto, passaporte nem vacina desta viagem: diga isso em uma linha` };
+	}
+	const todos = conferirViagem(viagem, hoje);
+	// quem nunca cadastrou documento nenhum não pode ouvir "cadastre o passaporte" em toda busca de
+	// preço: sobra o que depende só do destino, e o convite para contar os documentos uma vez.
+	return {
+		avisos: dossie ? todos : todos.filter((aviso) => aviso.regra === "visto"),
+		recadoExtra: dossie ? "" : "o usuário ainda não contou os documentos dele: diga, em uma linha, que se ele disser a validade do passaporte e a data de nascimento, você passa a conferir passaporte, vacina e autorização de menor",
+	};
+}
+
+// Só os voos deste pedido. O estado.voos guarda tudo o que foi pesquisado nas últimas 6 horas, e sem
+// este filtro uma pergunta sobre a Índia herda os voos de Miami da pergunta anterior: num teste de
+// verdade o bot avisou sobre visto americano numa viagem para Nova Deli. As buscas deste pedido estão
+// em estado.buscas, que o noPreparar zera, no formato "ORIGEM|DESTINO|DATA|...".
+export function voosDestePedido(estado: typeof Estado.State) {
+	const trechos = new Set(estado.buscas.map((chave) => chave.split("|").slice(0, 3).join("|")));
+	return estado.voos.filter((voo) => trechos.has(`${voo.origem}|${voo.destino}|${voo.data}`));
+}
+
+function noConferir(estado: typeof Estado.State, config: LangGraphRunnableConfig) {
+	const conversa = conversaDe(config);
+	const regras = regrasDaViagem(voosDestePedido(estado), lerDossie(conversa));
+	if (!regras || (regras.avisos.length === 0 && !regras.recadoExtra)) return {};
+
+	console.log(`[regras] ${regras.avisos.map((aviso) => `${aviso.gravidade}:${aviso.regra}`).join(", ") || "só o recado extra"}`);
+	anotar(conversa, "regras_da_viagem", true, regras.avisos.map((aviso) => aviso.regra).join(", "));
+	const linhas = regras.avisos.map((aviso) => `${aviso.gravidade === "impede" ? "IMPEDE A VIAGEM" : "atenção"}: ${aviso.texto}`);
+	return { recados: [...estado.recados, `regras da viagem: ${[...linhas, regras.recadoExtra].filter(Boolean).join(" | ")}`] };
+}
+
 // ---------- NÓ: REDATOR ----------
 // o único que fala com o usuário. Ele não tem ferramentas: só pode usar o que os outros trouxeram.
 async function noRedator(estado: typeof Estado.State, config: LangGraphRunnableConfig) {
@@ -230,7 +341,7 @@ function noVerificar(estado: typeof Estado.State, config: LangGraphRunnableConfi
 
 	const doPedido = anteriores.slice(anteriores.findLastIndex((mensagem) => mensagem.getType() === "human"));
 	const retornos = doPedido.filter((mensagem) => mensagem.getType() === "tool").map((mensagem) => mensagem.text);
-	const regraDoCustoBeneficio = "R$ 30 por hora e R$ 200 por escala";    // uma regra das instruções: o redator pode citar
+	const regraDoCustoBeneficio = REGRA_DO_CUSTO_BENEFICIO;    // a mesma regra das instruções do redator: ele pode citar os números
 	const fatos = [...retornos, ...estado.voos.map(descreverVoo), regraDoCustoBeneficio].join("\n");
 	const doUsuario = textosDoUsuario(estado.messages).join("\n");
 	// link escrito pelo usuário não vale: senão um link de golpe passaria
@@ -276,7 +387,7 @@ async function noPlanilha(estado: typeof Estado.State) {
 
 // ---------- ARESTAS CONDICIONAIS ----------
 function proximoDoPlano(estado: typeof Estado.State) {
-	return estado.plano[0] ?? "redator";
+	return estado.plano[0] ?? "conferir";    // acabou o plano: as regras da viagem antes de escrever
 }
 
 // o especialista pediu ferramenta? Se não, segue o plano (ou ele mesmo de novo, se ainda não saiu do plano)
@@ -294,10 +405,11 @@ function depoisDeVerificar(estado: typeof Estado.State) {
 // o SqliteSaver guarda a pasta num arquivo depois de cada nó: é a memória que sobrevive ao Ctrl+C
 const memoria = SqliteSaver.fromConnString(process.env.MEMORIA ?? import.meta.dirname + "/../memoria.sqlite");
 
-const CAMINHOS = ["memoria", "monitor", "pesquisador", "analista", "redator"] as const;
+const CAMINHOS = ["memoria", "monitor", "pesquisador", "analista", "conferir"] as const;
 const CAMINHOS_DO_ESPECIALISTA = ["ferramentas", ...CAMINHOS] as const;
 
-const grafo = new StateGraph(Estado)
+// exportado para o floorplan desenhar a camada de cima a partir do grafo de verdade, não de uma cópia à mão
+export const grafo = new StateGraph(Estado)
 	.addNode("preparar", noPreparar)
 	.addNode("orquestrador", noOrquestrador)
 	.addNode("memoria", criarEspecialista("memoria"))
@@ -305,6 +417,7 @@ const grafo = new StateGraph(Estado)
 	.addNode("pesquisador", criarEspecialista("pesquisador"))
 	.addNode("analista", criarEspecialista("analista"))
 	.addNode("ferramentas", noFerramentas)
+	.addNode("conferir", noConferir)
 	.addNode("redator", noRedator)
 	.addNode("verificar", noVerificar)
 	.addNode("emergencia", noEmergencia)
@@ -317,6 +430,7 @@ const grafo = new StateGraph(Estado)
 	.addConditionalEdges("pesquisador", depoisDoEspecialista, [...CAMINHOS_DO_ESPECIALISTA])
 	.addConditionalEdges("analista", depoisDoEspecialista, [...CAMINHOS_DO_ESPECIALISTA])
 	.addConditionalEdges("ferramentas", proximoDoPlano, [...CAMINHOS])
+	.addEdge("conferir", "redator")
 	.addEdge("redator", "verificar")
 	.addConditionalEdges("verificar", depoisDeVerificar, ["planilha", "redator", "emergencia"])
 	.addEdge("emergencia", "planilha")

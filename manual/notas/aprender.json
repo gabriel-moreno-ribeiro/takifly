@@ -1,0 +1,152 @@
+{
+  "file": "harness/aprender.ts",
+  "blocks": [
+    {
+      "from": 1,
+      "to": 10,
+      "note": "The file that closes the loop. The exam and the live bot both write scores to Langfuse, and this reads them back and turns them into one ranked list at harness/resultados/melhorias.md. Line 6 is the design decision worth keeping: this file does not change the bot. A person decides the fix, and the exam proves whether it worked."
+    },
+    {
+      "from": 11,
+      "to": 19,
+      "note": "The start date defaults to when Langfuse was switched on and can be overridden by an argument. The key is the public and secret key joined with a colon and base64 encoded, which is plain HTTP basic auth."
+    },
+    {
+      "from": 20,
+      "to": 31,
+      "note": "One request. Lines 24 to 28 handle rate limiting properly instead of giving up: on a 429, Langfuse says how many seconds to wait, so it waits that long and calls itself again. A non-OK status throws with the status and the first 300 characters of the body, which is what turns a wrong key into an obvious message rather than a mystery."
+    },
+    {
+      "from": 32,
+      "to": 43,
+      "note": "Paging. Each response carries a cursor to the next page, so it loops until the cursor is empty, collecting a hundred items at a time. Without this you would silently analyse only the first page and conclude the bot was fine."
+    },
+    {
+      "from": 44,
+      "to": 50,
+      "note": "Splitting a session id back into model, case and timestamp. This is the other half of the format built by the exam when it names a conversation, and the two files have to agree: change it there and this stops recognising anything."
+    },
+    {
+      "from": 51,
+      "to": 60,
+      "note": "The latest score per case. It fetches every \"passou\" score since the start date, keeps only sessions beginning with \"prova \", and for each model-and-case pair keeps the newest. The comment states the rule that makes the output trustworthy: if a case ran again and passed, the old failure does not count."
+    },
+    {
+      "from": 61,
+      "to": 67,
+      "note": "From those latest scores, keep the failures and group them by case, recording which model failed, the judge's comment and the session id for the link. Grouping by case rather than by model is what shows you a case that every model fails, which is usually a problem in the bot rather than in the model."
+    },
+    {
+      "from": 68,
+      "to": 78,
+      "note": "Tool errors, and the trick that makes them readable. Line 75 builds a template by replacing quoted strings with an ellipsis and every number with a hash, so \"não conheço X\" and \"não conheço Y\" collapse into one entry with a count of 40 rather than 40 separate lines. It keeps one real message as an example and one trace id to link to."
+    },
+    {
+      "from": 79,
+      "to": 90,
+      "note": "Refused answers. The same templating for prices and durations, then it reads the \"verificador_recusou\" and \"emergencia\" scores and splits each comment on \" | \", because that is the separator the verificar step used when it joined the problems. Each template is counted, so you learn which refusal happens most."
+    },
+    {
+      "from": 91,
+      "to": 110,
+      "note": "Writing the report. It looks up the project id to build clickable Langfuse links, sorts the cases by how many models failed them, and writes three sections: the failing cases with a link per model and the judge's comment, the refused answers by frequency, and the tool errors by frequency with a link to one real trace. Frequency order throughout, so the first thing you read is the thing that happens most."
+    },
+    {
+      "from": 111,
+      "to": 115,
+      "note": "Creates the folder, writes melhorias.md, and prints the heading plus where the full list is. The file is Markdown so the links work in your editor, and it is written fresh each run rather than appended, because it describes the current state rather than a history."
+    }
+  ],
+  "lines": {
+    "1": "What this file does: it reads everything that went wrong from Langfuse and writes the list of what to improve.",
+    "2": "An empty comment line.",
+    "3": "The first two sources: the exam cases that failed, and the answers the checker refused, both in the exam and in real Slack use.",
+    "4": "The third: the tools that ended in an error.",
+    "5": "What it does with them: groups similar ones, most frequent first, and saves the result as a markdown file.",
+    "6": "The boundary this file respects: it changes nothing. A person decides the fix, and the exam says whether it worked.",
+    "7": "An empty comment line.",
+    "8": "How to run it.",
+    "9": "With no argument it goes back to the day tracing was turned on.",
+    "10": "With a date it goes back only that far, which is how you check whether a fix helped.",
+    "12": "Two helpers from Node for creating the folder and writing the file.",
+    "14": "Reads .env from this file's own folder, so the keys are found whichever folder you run from.",
+    "16": "The day tracing started on this project. Anything earlier does not exist, so it is the natural default.",
+    "17": "The starting date: what you typed, or that default.",
+    "18": "The Langfuse address, your own instance or the cloud one.",
+    "19": "The two keys joined and base64 encoded, which is what HTTP Basic auth is: a username and a password in one header.",
+    "21": "One request to Langfuse, with the retry logic in one place so the callers stay simple.",
+    "22": "The call itself, with the auth header.",
+    "23": "Why the next block exists: Langfuse caps requests per minute and tells you how long to wait.",
+    "24": "429 is the status code for \"too many requests\".",
+    "25": "Reads how long to wait out of the reply.",
+    "26": "Waits that long, or a minute when it did not say.",
+    "27": "Then asks again. Calling itself is the shortest correct retry here, and it cannot loop forever because the wait is enforced by the server.",
+    "29": "Any other failure throws, with the status and the first 300 characters of the body, which is usually enough to see what is wrong.",
+    "30": "Returns the parsed JSON.",
+    "33": "Why the next function exists: Langfuse answers in pages, each one carrying a cursor to the next.",
+    "34": "Fetches every page of one listing.",
+    "35": "Everything collected so far.",
+    "36": "The cursor, empty on the first call.",
+    "37": "A do-while, because the first page has to be fetched before there is any cursor to test.",
+    "38": "Asks for a hundred at a time, adding the cursor only when there is one.",
+    "39": "Appends this page's items.",
+    "40": "Takes the next cursor, or empty when this was the last page.",
+    "41": "Keeps going while there is a cursor.",
+    "42": "Returns the whole list.",
+    "45": "A banner comment: the failed exam cases.",
+    "46": "The naming rule the exam and this file both depend on, and the reason for taking the newest: a case that was rerun and passed should not still count as a failure.",
+    "47": "Splits one session id into its parts.",
+    "48": "Destructuring, skipping the first word \"prova\". The comma with nothing before it is what skips it.",
+    "49": "Returns the three parts, with the time as a number so it can be compared.",
+    "52": "Fetches every \"passou\" score since the start date. That score is written by harness/avaliar.ts at the end of each case.",
+    "53": "The newest score per model and case.",
+    "54": "Walks every score.",
+    "55": "The session it belongs to, or empty when it is attached to something else.",
+    "56": "Skips anything that is not an exam session, which is how the Slack scores are left out of this part.",
+    "57": "Pulls the model, the case and the time out of the name.",
+    "58": "The key is the model plus the case, since the same case can be run against several models.",
+    "59": "Keeps this score only if it is the first or newer than the one stored, which is what makes a rerun win.",
+    "62": "The failures, grouped by case, so a case that every model fails stands out.",
+    "63": "Walks only the newest score of each model and case.",
+    "64": "Skips the passes.",
+    "65": "Reads the model and case back out of the session name.",
+    "66": "Appends this failure to the case, keeping the model, the comment and the session id for the link.",
+    "69": "A banner comment: the tool errors.",
+    "70": "Fetches every observation marked ERROR, which is how a thrown tool shows up in tracing.",
+    "71": "Similar errors grouped together, with a count, an example and one trace to open.",
+    "72": "Walks every error.",
+    "73": "Why the next lines rewrite the message: \"I do not know X\" and \"I do not know Y\" are the same bug and should be counted once.",
+    "74": "The message, with a fallback so a missing one does not become \"undefined\".",
+    "75": "The template: quoted values become \"…\" and any number becomes #, then the tool name is put in front and it is cut to 160 characters.",
+    "76": "What was already counted for this template.",
+    "77": "Stores the increased count, keeping the first example and the first trace id, which is the one you will open.",
+    "80": "A banner comment: the refused answers.",
+    "81": "Groups one refusal message into the map.",
+    "82": "The same idea as above: prices and durations become # so two refusals about different flights count as one problem.",
+    "83": "Adds one to that template.",
+    "86": "The refusals, template to count.",
+    "87": "Two score names: the checker refusing an answer, and the emergency fallback firing. Both are written by harness/agente.ts.",
+    "88": "Fetches every score with that name.",
+    "89": "One score can hold several problems joined by \" | \", so each is grouped separately.",
+    "92": "A banner comment: writing the file.",
+    "93": "The project id, needed to build dashboard links. Taking the first project is the lazy move, and this setup has one.",
+    "94": "Builds a link to a session, which is what makes a failure one click from the full conversation.",
+    "95": "Builds a link to a trace, for the tool errors.",
+    "97": "The cases, most failed first, so the top of the list is where a fix helps most models at once.",
+    "98": "The heading and the summary line, with the counts that tell you whether the run is even worth reading.",
+    "99": "One section per failed case.",
+    "100": "The heading, with how many models failed it, and the singular or plural word to match.",
+    "101": "One bullet per model, linking to the session and quoting the judge's comment, cut to 300 characters.",
+    "102": "A blank line between sections.",
+    "104": "The second section: the refused answers.",
+    "105": "Most frequent first, one line each with the count.",
+    "106": "A blank line.",
+    "107": "The third section: the tool errors.",
+    "108": "Most frequent first.",
+    "109": "The count and the template, linked to one real trace so you can see it happen.",
+    "112": "Creates the results folder. `recursive: true` makes it do nothing when the folder is already there.",
+    "113": "Writes the file, joining the pieces with line breaks.",
+    "114": "Prints the summary, so the terminal already tells you whether anything changed.",
+    "115": "Points at the full file, which is the thing you actually read."
+  }
+}

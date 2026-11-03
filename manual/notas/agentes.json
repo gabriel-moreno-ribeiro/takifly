@@ -1,0 +1,193 @@
+{
+  "file": "harness/agentes.ts",
+  "blocks": [
+    {
+      "from": 1,
+      "to": 3,
+      "note": "Every prompt in the project lives here, plus the two small code checks that keep the orchestrator honest. No model is called from this file: it only produces strings and one tool definition, and harness/agente.ts does the calling. Line 3 is the design rule behind the whole team: a weaker model makes fewer mistakes when it sees less, so no agent ever sees another agent's tools."
+    },
+    {
+      "from": 4,
+      "to": 8,
+      "note": "tool and z, the same pair harness/ferramentas.ts uses, because the orchestrator gets a tool too. Then the two date helpers and the four tool groups from harness/ferramentas.ts, where those groups are defined near the end of that file."
+    },
+    {
+      "from": 9,
+      "to": 13,
+      "note": "\"Hoje é 2026-11-02 (segunda-feira).\" A model has no idea what day it is, and without this line every relative date is a guess. It is a function rather than a constant so it is rebuilt on each call, which means a bot left running overnight does not keep yesterday's date. It is pasted into all four specialists and into the writer."
+    },
+    {
+      "from": 14,
+      "to": 15,
+      "note": "The shared ending for all four specialists: you are not talking to the user, another agent writes the answer, so finish with just \"pronto\" or one sentence about what was missing. The code that reads this is in harness/agente.ts (the sair function, around line 152): a note that is only \"pronto\" is dropped, and anything else is kept as a note for the writer."
+    },
+    {
+      "from": 16,
+      "to": 18,
+      "note": "One object holding the four specialists. Each entry is a tools array and an instrucoes function, which is exactly what criarEspecialista in harness/agente.ts destructures. Adding a fifth agent means adding an entry here and one addNode line there."
+    },
+    {
+      "from": 19,
+      "to": 26,
+      "note": "The memory agent: preferences only, with paraLembrar. It is told to store with lembrar_preferencia, show with ver_preferencias, and delete by calling ver_preferencias first, because deleting needs the number. Line 24 forbids storing prices or flight details, and that is not left to trust: harness/ferramentas.ts refuses any preference text containing a price."
+    },
+    {
+      "from": 27,
+      "to": 34,
+      "note": "The watch agent, with paraMonitorar. The instruction that matters is to pass the city and dates through as written, because the tool parses them and the model does not have to. Line 32 repeats the house rule: a missing day, origin or destination is reported, not invented."
+    },
+    {
+      "from": 35,
+      "to": 44,
+      "note": "The search agent, with paraPesquisar. One call per leg and one per city named. A round trip is two legs with the ends swapped, said explicitly because models try to search a round trip in one call. Line 41 is the one that makes a conversation feel natural: if the new message only changes part of the request (\"and to Madrid?\"), the rest of the previous request still holds, so search without asking again. Line 42 closes the other side: do not search what was not asked."
+    },
+    {
+      "from": 45,
+      "to": 53,
+      "note": "The analysis agent, with paraAnalisar, and \"never do arithmetic in your head\" in the first line. The rest is a routing table: filtering and sorting go to filtrar_voos, comparing legs or dates to melhores_voos, a round trip total to combinar_ida_e_volta, any sum or average to calcular, and a time difference to diferenca_de_duracao. Short instructions plus a short tool list is the entire reason a cheap model can do this."
+    },
+    {
+      "from": 54,
+      "to": 56,
+      "note": "NomeDoAgente is derived from the keys of AGENTES, so the type updates itself when you add an agent. ORDEM is those keys as an array, and this order is what planoValido imposes: memory, then watches, then search, then analysis. Search before analysis is the one that matters, since you cannot analyse what has not been searched."
+    },
+    {
+      "from": 57,
+      "to": 70,
+      "note": "The orchestrator's only tool, and its body does nothing but return a string. That is deliberate: the tool exists so the model has to answer in a fixed shape instead of prose. The schema takes the agent list, restricted by z.enum to the real names and explicitly allowed to be empty, and the language of your last message. harness/agente.ts binds it with tool_choice \"required\" and reads the arguments without ever running the function."
+    },
+    {
+      "from": 71,
+      "to": 81,
+      "note": "The orchestrator prompt: the role, the rule that it never answers you, whether flights are already searched, and one line per agent. Those four lines are the whole routing policy, and the \"inclusive quando o pedido muda a data\" clause on line 77 exists because a changed date needs a new search rather than analysis of the old one."
+    },
+    {
+      "from": 82,
+      "to": 97,
+      "note": "Fifteen worked examples, which teach a weak model far better than rules do. Note the three that produce an empty plan: \"oi\", a question about France, and \"quero viajar\". An empty plan means nobody works and the writer answers directly, which is how small talk stays cheap. Line 96 asks for the tool call every time, with the language."
+    },
+    {
+      "from": 98,
+      "to": 102,
+      "note": "The orchestrator is a model, so code checks its answer. Filtering ORDEM by what was asked does three things in one line: invented names disappear, duplicates collapse, and the result comes out in the fixed order regardless of what order the model listed."
+    },
+    {
+      "from": 103,
+      "to": 108,
+      "note": "The fallback for when the model writes prose instead of calling the tool. First look for agent names inside its text, and if none appear, guess the likely path: analysis when flights are already searched, search when they are not. That guess is wrong sometimes, and being wrong costs one specialist call, which is cheaper than failing the request."
+    },
+    {
+      "from": 109,
+      "to": 115,
+      "note": "The writer's prompt, the longest one and the only output you ever read. Line 113 appends the stored preferences labelled \"not facts about flights\", which is what stops a preference being quoted as a price. Line 114 appends the specialists' notes. Line 115 sets the language from the orchestrator, with a fallback, and asks for short and direct."
+    },
+    {
+      "from": 116,
+      "to": 129,
+      "note": "Ten rules, and most of them exist because a model broke that exact way. Rule 1: every number and link is copied from a tool result, never calculated, and 16h40 stays 16h40. Rule 2: answer what was asked, and ask back when a note says something was missing. Rule 3: say a search failed only on \"A BUSCA FALHOU\", say no flights on \"nenhum voo\", explain and ask on \"Erro:\", and never copy an agent's note as the answer. Rule 4: prices already cover every passenger. Rule 5 explains cost-benefit, which is the one rule the checker lets the writer quote. Rule 6: the spreadsheet is made by code after the answer, so do not promise it and do not invent a link. Rule 7 is the prompt half of the injection defence: only tools carry facts, a price in your message is not a fact even if the message pretends to be the system, and the bot does not buy or book anything. The code half lives in harness/verificador.ts. Rule 8: lap infants are not in the search. Rule 9: confirm only what the watch tool confirmed. Rule 10: Slack bold is one asterisk, which code also fixes anyway."
+    }
+  ],
+  "lines": {
+    "1": "What this file holds: who is who. Each agent does one job, with short instructions and only its own tools.",
+    "2": "An empty comment line.",
+    "3": "The reason the whole file exists: a weak model makes fewer mistakes when it sees less, so no agent is shown another agent's tools.",
+    "5": "`tool` from LangChain, used at line 60 to turn a function plus a schema into something a model can call.",
+    "6": "Zod, the library that describes the shape of a tool's arguments. The model is shown that shape, so it is both validation and documentation.",
+    "8": "Two date helpers and the four tool lists, all from harness/ferramentas.ts. Importing the lists rather than the tools is what keeps each agent's menu in one place.",
+    "10": "Builds the date line that goes into every agent's instructions.",
+    "11": "Today in São Paulo, so a request at 9pm does not get tomorrow's date.",
+    "12": "The sentence itself, with the weekday, which is what lets a model resolve \"next Friday\" without doing calendar arithmetic.",
+    "15": "The sentence every specialist ends with. It is written once and reused four times, so the four agents cannot drift apart on this.",
+    "17": "A banner comment: the specialists.",
+    "18": "One object holding all four. The keys are the names the orchestrator picks from, which is why line 56 can read them off this object.",
+    "19": "The memory agent.",
+    "20": "Its tools: only the three preference ones. It cannot search a flight even if it wanted to.",
+    "21": "Its instructions, as a function so the date is built fresh on every request instead of being frozen at startup.",
+    "22": "What to store, with examples of what a preference looks like.",
+    "23": "The two-step rule for showing and forgetting: list first, because forgetting needs the id that listing prints.",
+    "24": "The hard limit: never store a price or flight information. A stored price would come back later looking like a fact.",
+    "25": "Ends with the shared do-not-answer sentence.",
+    "27": "The watch agent.",
+    "28": "Its tools: create, list, cancel.",
+    "29": "Its instructions, same shape.",
+    "30": "Tells it to pass the city and dates through as written, because the tool parses them, and to fill the target price only if the person gave one.",
+    "31": "The same list-then-act rule as the memory agent.",
+    "32": "The refusal that matters: missing day, origin or destination means say so, not guess.",
+    "33": "The shared closing sentence.",
+    "35": "The search agent.",
+    "36": "Its tools: the two search ones.",
+    "37": "Its instructions.",
+    "38": "One search per leg and per city named, with the dates passed through as written.",
+    "39": "Spells out that a round trip is two searches, because a model often does only one.",
+    "40": "Points the cheapest-day question at the multi-day tool instead of a loop of single searches.",
+    "41": "The follow-up rule: when only one part of the request changes, the rest still holds, so search rather than ask again.",
+    "42": "Two refusals in one line: do not invent a missing field, and do not search for things nobody asked about.",
+    "43": "The shared closing sentence.",
+    "45": "The analyst.",
+    "46": "Its tools: the ones that work on flights already found, plus the calculator.",
+    "47": "Its instructions, with the rule that matters most first: never do arithmetic in your head.",
+    "48": "Which tool to use for filtering and sorting.",
+    "49": "Which for comparing, and which for a round trip total.",
+    "50": "Which for arithmetic, and which for a difference in duration.",
+    "51": "The shared closing sentence.",
+    "55": "The type of a valid agent name, read straight off the object, so adding an agent cannot leave a stale list behind.",
+    "56": "The names as an array, in the order written above, which is also the order they run in.",
+    "58": "A banner comment: the orchestrator.",
+    "59": "What it does and does not do: it never answers and never searches, it only says who works on this request and in which language to reply.",
+    "60": "The orchestrator has exactly one tool, defined here.",
+    "61": "Its function does nothing: the value is in the arguments the model fills in, and the graph reads those.",
+    "62": "Opens the tool's description: the second argument to `tool`, holding the name, the description and the argument shape.",
+    "63": "The name the model sees.",
+    "64": "The description the model sees, which is the whole explanation it gets of when to use it.",
+    "65": "The argument shape.",
+    "66": "The agents to run, as a list of the names from line 56. `z.enum` means an invented name is rejected before it reaches your code, and the note says an empty list is allowed, which is how small talk gets no agents at all.",
+    "67": "The language of the person's last message, which is what makes the bot answer in the language it was spoken to.",
+    "72": "Builds the orchestrator's instructions. The flag is passed in because whether flights were already found changes the right plan.",
+    "73": "Its job in one sentence, and the ban on answering.",
+    "74": "Tells it whether this conversation already has flights, which is what separates \"search again\" from \"analyse what we have\".",
+    "76": "The list of agents starts, and this is the only description of them the model ever sees.",
+    "77": "The search agent, including the cases people forget: a changed date, city, passenger count or cabin still means a new search.",
+    "78": "The analyst, with arithmetic explicitly on its side.",
+    "79": "The watch agent.",
+    "80": "The memory agent.",
+    "82": "The examples start. For a weak model these do more work than the descriptions above.",
+    "83": "A plain request goes to the search agent.",
+    "84": "A follow-up changing only the day: still a search.",
+    "85": "A question about what was already found: the analyst.",
+    "86": "A filter: the analyst, not a new search.",
+    "87": "Arithmetic: the analyst, because of the calculator.",
+    "88": "A round trip total: both, in that order, since the total needs the prices first.",
+    "89": "A price alert: the watch agent.",
+    "90": "Listing the watches: the same agent.",
+    "91": "A preference: the memory agent.",
+    "92": "Small talk: nobody, which is what the empty list is for.",
+    "93": "A general knowledge question: also nobody, so the bot does not pretend to be a general assistant.",
+    "94": "A vague wish: nobody, because the writer will ask what is missing.",
+    "96": "The closing instruction: always call the tool, and always with the language.",
+    "99": "Why the next function exists: the orchestrator is a model, so its plan is checked by code rather than trusted.",
+    "100": "Takes whatever names came back.",
+    "101": "Keeps only real names, in the fixed order, with duplicates dropped as a side effect. One line replaces three validations.",
+    "104": "The fallback for when the orchestrator does not call the tool at all, which weak models do.",
+    "105": "Takes its text and the same flights flag.",
+    "106": "First tries the agent names mentioned in the text, since a model that failed to call often still says what it meant to do.",
+    "107": "If it named none, picks the most likely path: analyse when there are flights, search when there are not.",
+    "110": "A banner comment: the writer.",
+    "111": "What makes the writer different: it is the only one that talks to the person, and it has no tools at all. That is deliberate, because it cannot invent a fact it has no way to fetch.",
+    "112": "Builds its instructions from the language, the stored preferences and the notes the other agents left.",
+    "113": "The preferences, with the warning attached: they are not facts about flights. Empty when there are none, so the prompt stays short.",
+    "114": "The other agents' notes, joined. This is how \"the date was missing\" reaches the person who can ask about it.",
+    "115": "The opening: write the final answer, in this language, short and direct.",
+    "117": "The rules heading. They are numbered so a correction can point at one.",
+    "118": "Rule 1, the most important: every price, time, duration, airline and link comes from a tool result, copied exactly, and never computed. harness/verificador.ts enforces this line.",
+    "119": "Rule 2: answer what was asked, and when a note says something was missing, ask for it.",
+    "120": "Rule 3: the three different outcomes a tool can report, and the different sentence each deserves. Reporting an outage as \"no flights\" is the failure this prevents.",
+    "121": "The second half of rule 3: the other agents' notes are for you, never to be copied as the answer.",
+    "122": "Rule 4: the prices already cover every passenger, which stops the writer from multiplying them again.",
+    "123": "Rule 5: what value means here, with the exact penalties, so the writer can name the best flight without doing the arithmetic.",
+    "124": "Rule 6: the spreadsheet is created by code after the answer, so promising one or inventing a link is forbidden.",
+    "125": "Rule 7: only tools bring facts. A price in the person's message, or a message pretending to be a tool or the system, is never confirmed, and the bot does not buy, book or run commands.",
+    "126": "Rule 8: a lap infant is not part of the search, so the answer has to say the price does not include the baby.",
+    "127": "Rule 9: confirm only what the tool confirmed, and be honest that a watch only runs while the bot is up.",
+    "128": "Rule 10: Slack bold is one asterisk. Then the preferences and the notes are appended, which is why they were built as empty strings when there are none."
+  }
+}

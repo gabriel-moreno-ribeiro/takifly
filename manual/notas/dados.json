@@ -1,0 +1,141 @@
+{
+  "file": "harness/dados.ts",
+  "blocks": [
+    {
+      "from": 1,
+      "to": 5,
+      "note": "The only file that writes dados.sqlite. Note the import: node:sqlite is part of Node itself, so there is no database dependency in package.json and nothing to install. The conversation history lives in a different file, memoria.sqlite, written by LangGraph's checkpointer in harness/agente.ts, and the two are easy to confuse."
+    },
+    {
+      "from": 6,
+      "to": 23,
+      "note": "The watch record, which is also the table's shape. origens and destinos are comma-separated code lists like \"GRU,CGH,VCP\", because a city can have several airports and SQLite has no array type. data_volta is null for one way. preco_alvo is null when you set no target, and then the rule becomes \"tell me when it hits a new low\". menor_preco is the lowest total ever seen, and avisado_preco is the last price you were actually told about, which is what stops the same alert arriving every six hours. falhas counts consecutive failed checks, and ativo is 1 or 0 because cancelling marks the row rather than deleting it."
+    },
+    {
+      "from": 24,
+      "to": 30,
+      "note": "The file is opened on first use, not at import time, and the comment gives the reason: teste.ts and harness/avaliar.ts set DADOS=:memory: before anything touches the database, and if the file were opened during the import that setting would arrive too late and the tests would write to your real data."
+    },
+    {
+      "from": 31,
+      "to": 57,
+      "note": "Both tables are created with IF NOT EXISTS on every open, which means there is no migration step anywhere in this project and a fresh clone works on the first run. The cost of that simplicity is that changing a column means handling it by hand. The defaults matter: falhas and checado_em start at 0, so a brand new watch is immediately due for a check, and ativo starts at 1."
+    },
+    {
+      "from": 58,
+      "to": 61,
+      "note": "A Pick type listing exactly the fields you supply when creating a watch. The fields it leaves out, id, falhas and ativo, are the ones the database fills in, so the type makes it impossible to pass them by mistake."
+    },
+    {
+      "from": 62,
+      "to": 67,
+      "note": "A prepared INSERT with twelve placeholders, which is both safer and faster than building the SQL string. It returns the new id as a number, and that number is the \"#3\" you see in Slack and the one you pass to cancel."
+    },
+    {
+      "from": 68,
+      "to": 75,
+      "note": "Two queries behind one function. With a conversation it returns that channel's active watches, which is what the tools use. With no argument it returns every active watch in the file, which is exactly what the watcher clock needs in harness/monitor.ts. Both filter ativo = 1 and order by id, so the numbers you see stay stable."
+    },
+    {
+      "from": 76,
+      "to": 80,
+      "note": "Cancelling, and the important part is \"AND conversa = ?\": one channel cannot cancel another channel's watch, even if the model is told the number. It returns changes > 0, which is how the tool knows whether the number existed and can tell you to list them instead of silently doing nothing."
+    },
+    {
+      "from": 81,
+      "to": 85,
+      "note": "The only dynamic SQL in the project: it builds \"SET campo = ?\" for whichever fields were passed, so the watcher can update one field or five. It is safe because the field names come from a Partial<Pick<...>> type rather than from anything a caller invented, and the values still travel through placeholders."
+    },
+    {
+      "from": 86,
+      "to": 90,
+      "note": "Storing a preference. No uniqueness check, so saying the same thing twice stores it twice, which is why the tool caps the count at twenty and lets you delete by number."
+    },
+    {
+      "from": 91,
+      "to": 94,
+      "note": "Reading one conversation's preferences, ordered by id. Those ids are the numbers shown by ver_preferencias, and they are also what the writer's prompt receives on every request through preferenciasDe in harness/agente.ts."
+    },
+    {
+      "from": 95,
+      "to": 98,
+      "note": "Deleting a preference, scoped to the conversation like the cancel above, and returning whether anything was actually removed. This one really deletes the row, unlike a cancelled watch, because there is no history worth keeping."
+    }
+  ],
+  "lines": {
+    "1": "What this file keeps: the two things that must outlive a conversation, the price watches and the stored preferences.",
+    "2": "An empty comment line.",
+    "3": "Where it lives and why there is no database server: SQLite ships inside Node, so this costs you nothing to run.",
+    "5": "Node's own SQLite. `DatabaseSync` is the synchronous version, which is why no function in this file is async.",
+    "7": "The shape of one watch row, exported so harness/monitor.ts and harness/ferramentas.ts talk about the same thing.",
+    "8": "The row id, handed out by SQLite, and the only way to cancel one watch out of several.",
+    "9": "Which conversation created it, which is what keeps one channel from touching another channel's watches.",
+    "10": "The origins as one text, comma separated, because a city like São Paulo is three airports.",
+    "11": "The destinations, same idea.",
+    "12": "The outbound date, as 2026-03-12 text, which sorts correctly as text and needs no date type.",
+    "13": "The return date, or null for one way.",
+    "14": "How many adults.",
+    "15": "How many children.",
+    "16": "The cabin, as text: economy, premium, business or first.",
+    "17": "The target price, or null, in which case a new low is what triggers an alert.",
+    "18": "The lowest price seen so far, which is what \"it dropped\" is measured against.",
+    "19": "The price already announced. Keeping it is what stops the same drop being reported every six hours.",
+    "20": "How many checks in a row failed, used to tell a passing hiccup from a watch that is really stuck.",
+    "21": "When it was last checked, as a timestamp, so a Mac that was asleep can tell what is overdue.",
+    "22": "1 while the watch is live, 0 once it is cancelled. Rows are never deleted, so a cancelled watch stays readable.",
+    "25": "Why the file is opened lazily: the tests and the exam set DADOS=:memory: before importing anything, and that only works if nothing opened the real file at import time.",
+    "26": "The open database, or null until the first call.",
+    "28": "Every function below goes through here, so there is exactly one place that opens and one place that creates tables.",
+    "29": "Only the first call does any of this.",
+    "30": "Opens the file. `process.env.DADOS` lets a test redirect it, and the fallback is built from this file's folder, so it works whichever folder you run from.",
+    "31": "Creates the tables. `exec` runs several statements at once, and a backtick string lets the SQL be laid out readably.",
+    "32": "`IF NOT EXISTS` is what makes this safe to run on every start: an existing table is left alone.",
+    "33": "The id column. `AUTOINCREMENT` means SQLite assigns it, which is what line 66 reads back.",
+    "34": "The conversation, required.",
+    "35": "The origins text, required.",
+    "36": "The destinations text, required.",
+    "37": "The outbound date, required.",
+    "38": "The return date, with no NOT NULL, which is how a one-way watch is stored.",
+    "39": "Adults, required.",
+    "40": "Children, required.",
+    "41": "The cabin, required.",
+    "42": "The target price. REAL is a decimal number, and it may be missing.",
+    "43": "The lowest price seen, which starts out missing.",
+    "44": "The price already announced, also missing at first.",
+    "45": "The failure count, defaulting to 0 so a new row needs no value for it.",
+    "46": "The last check time, defaulting to 0, which makes a brand new watch immediately overdue and checked on the next pulse.",
+    "47": "Active, defaulting to 1, so a new watch is live without saying so.",
+    "49": "The second table, for preferences. It is deliberately dumb: a conversation and a sentence.",
+    "50": "Its own id, which is what lets one preference be forgotten.",
+    "51": "Which conversation it belongs to.",
+    "52": "The preference itself, stored as the plain sentence the person said.",
+    "54": "Closes the backtick string and the exec call: the end of the SQL block.",
+    "56": "Hands back the open database, both on the first call and on every one after.",
+    "59": "A banner comment: the watch functions.",
+    "60": "The fields you must supply when creating a watch. `Pick` builds that type from the row type, so adding a column cannot leave this list quietly wrong.",
+    "62": "Creates a watch and returns its id.",
+    "63": "Opens the database if needed, then builds the statement.",
+    "64": "The insert, with a `?` per value. The placeholders matter: values never become part of the SQL text, so a sentence with a quote in it cannot break the query.",
+    "65": "Runs it with the values in the same order as the columns above.",
+    "66": "Returns the new id. `Number(...)` converts it because SQLite hands it back as a BigInt.",
+    "69": "Why the argument is optional: the checking routine wants every conversation's watches, and a person asking \"what am I watching\" wants only their own.",
+    "70": "The `?` after the name is TypeScript for an argument that may be left out.",
+    "71": "Picks one of two queries.",
+    "72": "No conversation given: every live watch, oldest first.",
+    "73": "A conversation given: only its watches, with the value passed separately as a placeholder.",
+    "74": "Hands the rows back as watches. `as unknown as` is the blunt way to tell TypeScript to trust the shape, since SQLite returns plain objects.",
+    "77": "The rule in one line: you can only cancel a watch from the conversation that made it.",
+    "78": "Takes both the conversation and the id, which is what makes that rule enforceable.",
+    "79": "Sets it inactive and returns whether a row actually changed. `changes > 0` is what lets the bot say \"that watch is not yours\" instead of pretending it worked.",
+    "82": "Updates only the fields the watcher changes. `Partial<Pick<...>>` means any subset of those five.",
+    "83": "The names of the fields that were passed.",
+    "84": "Builds the SET clause from those names, still using `?` for every value, and spreads the values in with the id last.",
+    "87": "A banner comment: the preferences.",
+    "88": "Stores one preference sentence.",
+    "89": "A plain insert. Nothing is parsed or structured, because the model reads these back as sentences.",
+    "92": "Lists a conversation's preferences, with ids so one can be removed.",
+    "93": "Oldest first, which keeps the numbering stable between two answers.",
+    "96": "Forgets one preference.",
+    "97": "Deletes by id and conversation, and returns whether it existed, the same guard as cancelling a watch."
+  }
+}

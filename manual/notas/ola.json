@@ -1,0 +1,20 @@
+{
+  "file": "ola.ts",
+  "blocks": [
+    {
+      "from": 1,
+      "to": 2,
+      "note": "The first file of the project, four lines long, kept as a record. Its only job was to prove that Node runs a TypeScript file directly, with no build step, no tsc and no bundler. The entire project depends on that being true."
+    },
+    {
+      "from": 3,
+      "to": 4,
+      "note": "A typed constant and a print. The \": string\" is the only TypeScript here, and it is what would fail if Node were really just running JavaScript. If this file runs, every other .ts file in the project can run the same way."
+    }
+  ],
+  "lines": {
+    "1": "A comment naming the step: the file exists only to prove Node can run a .ts file with no build step.",
+    "3": "Declares a value that never changes. `: string` is the type annotation, the one thing plain JavaScript does not have, so if this line runs you really are running TypeScript.",
+    "4": "Prints to the terminal. The `+` glues the two pieces of text together, so you see the value of `nome` rather than the word nome."
+  }
+}

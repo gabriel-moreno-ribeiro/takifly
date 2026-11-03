@@ -28,6 +28,10 @@ export function precoEquivalente(voo: Voo) {
 	return Math.round(voo.preco + (voo.duracao_min / 60) * CUSTO_POR_HORA + voo.escalas * CUSTO_POR_ESCALA);
 }
 
+// a mesma regra em palavras, para a instrução do redator e para o verificador. Ela mora aqui, junto da
+// conta, porque escrita em dois lugares um dia fica diferente: aí o verificador recusaria uma resposta certa.
+export const REGRA_DO_CUSTO_BENEFICIO = `o preço somado a R$ ${CUSTO_POR_HORA} por hora de viagem e R$ ${CUSTO_POR_ESCALA} por escala`;
+
 // ---------- MONTAR O PEDIDO ----------
 // o Google recebe a busca no parâmetro "tfs": um formato binário chamado Protobuf, escrito em base64.
 // Cada campo é: número do campo + tipo + (tamanho) + valor.
@@ -87,6 +91,14 @@ function formatarHora(hora: number[] | null) {
 	return doisDigitos(hora?.[0] ?? 0) + ":" + doisDigitos(hora?.[1] ?? 0);
 }
 
+// O nome da companhia é o ÚNICO texto livre que entra aqui de fora: tudo o mais que lemos da página é
+// número ou horário. Texto de fora vira ToolMessage, e o modelo obedece ao que lê numa ToolMessage; então
+// o nome é limitado aqui, na entrada, e não depois. Sobram letras, números e a pontuação de nome de empresa.
+export function nomeDeCompanhia(bruto: unknown) {
+	const limpo = String(bruto ?? "").replace(/[^\p{L}\p{N} .\-&+']/gu, " ").replace(/\s+/g, " ").trim();
+	return limpo.slice(0, 60) || "companhia não informada";
+}
+
 export function lerPagina(html: string, origem: string, destino: string, data: string, link: string): Voo[] {
 	// os voos ficam num <script class="ds:1">, com um JSON depois de "data:"
 	const marca = html.indexOf('class="ds:1"');
@@ -99,10 +111,17 @@ export function lerPagina(html: string, origem: string, destino: string, data: s
 	try {
 		const pagina = JSON.parse(dados);
 		if (pagina.length === 0) return [];    // rota que não existe: o Google manda uma lista vazia
+		// Rota que existe mas não tem nenhum voo no dia (SSA→DEL, por exemplo): a posição dos voos vem
+		// nula. Conferido na mão: nessa página não há um "R$" sequer, então é mesmo ausência de voo, e
+		// não um formato que a gente deixou de entender. Antes disso aqui, o nó estourava "formato novo".
+		// o "length > 4" importa: sem ele, uma página de formato desconhecido (curta) também viraria
+		// "nenhum voo", e a gente perderia o aviso de que o Google mudou. Aqui a lista é longa e a
+		// posição dos voos está explicitamente nula.
+		if (pagina.length > 4 && pagina[3] === null) return [];
 
 		for (const item of pagina[3][0] ?? []) {
-			const preco = item[1]?.[0]?.[1];
-			if (preco == null) continue;    // às vezes o Google mostra um voo sem preço
+			const preco = Number(item[1]?.[0]?.[1]);
+			if (!Number.isFinite(preco) || preco <= 0) continue;    // às vezes o Google mostra um voo sem preço
 
 			const trechos = item[0][2];
 			const primeiro = trechos[0];
@@ -116,11 +135,13 @@ export function lerPagina(html: string, origem: string, destino: string, data: s
 				if (i > 0) duracao += paraMinutos(trechos[i][20], trechos[i][8]) - paraMinutos(trechos[i - 1][21], trechos[i - 1][10]);
 			}
 
+			if (!Number.isFinite(duracao) || duracao <= 0) continue;    // um campo de duração estranho daria NaN no custo-benefício
+
 			voos.push({
 				origem,
 				destino,
 				data,
-				companhia: item[0][1].join(" + "),
+				companhia: (item[0][1] ?? []).map(nomeDeCompanhia).join(" + ") || "companhia não informada",
 				preco,
 				duracao_min: duracao,
 				escalas: trechos.length - 1,

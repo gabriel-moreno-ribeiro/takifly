@@ -1,0 +1,69 @@
+{
+  "file": "harness/rastreio.ts",
+  "blocks": [
+    {
+      "from": 1,
+      "to": 4,
+      "note": "Thirty-two lines that make the bot measurable. Every model call, every tool call, the tokens and the timings end up in Langfuse, which is what harness/aprender.ts later reads to tell you what to fix. Line 3 is the property that keeps it out of the way: with no LANGFUSE keys in .env, nothing is sent and the bot behaves identically."
+    },
+    {
+      "from": 5,
+      "to": 9,
+      "note": "Four imports, because tracing is layered. LangfuseClient is the plain API client, used only for the scores. CallbackHandler is the LangChain adapter that captures a whole run as a trace. LangfuseSpanProcessor exports OpenTelemetry spans to Langfuse, and NodeTracerProvider is OpenTelemetry's own tracer, which is what the LangChain libraries report into underneath."
+    },
+    {
+      "from": 10,
+      "to": 11,
+      "note": "Loads .env relative to this file, so the keys are found no matter which folder you started from. It runs again here even though other files also load it, which is harmless and makes this file safe to import on its own."
+    },
+    {
+      "from": 12,
+      "to": 12,
+      "note": "One boolean controls the entire file: tracing is on if the secret key exists. Everything below branches on this and nothing else."
+    },
+    {
+      "from": 13,
+      "to": 16,
+      "note": "The tracer is created either with the Langfuse exporter or with an empty processor list, and then registered globally either way. Registering unconditionally is what keeps the rest of the code identical whether tracing is on or off. The client is null when off, and the ?. further down is what makes that safe."
+    },
+    {
+      "from": 17,
+      "to": 21,
+      "note": "Returns an array with one handler, or an empty array. It is passed straight into grafo.stream as \"callbacks\" in harness/agente.ts, and an empty array means no tracing with no if statement at the call site. sessionId is the conversation, which groups every message of a channel into one session in the dashboard, and the model name goes in as a tag so you can filter one model's runs."
+    },
+    {
+      "from": 22,
+      "to": 26,
+      "note": "Writes a true or false score on the session, with a comment cut to 500 characters. It is called three times in the project: as \"verificador_recusou\" when the checker refuses an answer, as \"emergencia\" when the writer fails every attempt, and as \"passou\" for each exam case. harness/aprender.ts reads exactly those three names back out, so renaming one here breaks the fix list there."
+    },
+    {
+      "from": 27,
+      "to": 32,
+      "note": "Traces are sent in batches, so a program that exits quickly has to push what is buffered before closing. The exam calls this as its very last step. The long-running bot never needs it, because there is always another batch window."
+    }
+  ],
+  "lines": {
+    "1": "What this file is for: it sends everything that happens inside the graph to Langfuse, so a bad answer can be read back step by step instead of guessed at.",
+    "2": "An empty comment line, separating the title from the note below.",
+    "3": "The promise this file keeps: with no keys in .env, every function here quietly does nothing and the bot behaves exactly the same.",
+    "5": "The Langfuse client, used at line 16 to leave scores.",
+    "6": "The bridge between LangChain and Langfuse. Handing this to a model call is what makes each message, tool call, token count and timing show up on the dashboard.",
+    "7": "The piece that ships OpenTelemetry spans to Langfuse, installed into the provider on line 13.",
+    "8": "Node's tracer provider, the thing that collects spans in this process.",
+    "10": "Reads the .env file. The path is built from `import.meta.dirname`, this file's own folder, plus `/../`, so it finds the file whether you run the bot from the project root or from harness/.",
+    "12": "One switch for the whole file: is there a secret key at all? `Boolean(...)` turns the missing value into false, and every function below checks this.",
+    "13": "Creates the collector. With tracing off the list of processors is empty, so spans are created and dropped instead of being sent anywhere.",
+    "14": "Registers the provider globally, which is how the LangChain code finds it without being handed anything.",
+    "16": "The client, or null when tracing is off. The `?.` calls below are what make that null harmless.",
+    "18": "Why the two arguments: the session id groups a whole conversation on the dashboard, and the tag lets you filter by model when comparing them.",
+    "19": "Exported and called from harness/agente.ts, which passes the result into every model call as the callbacks list.",
+    "20": "Returns a one-item list, or an empty list when tracing is off. LangChain accepts an empty callbacks list, which is why nothing else in the code needs an if.",
+    "23": "What a score is for: a note attached to the conversation. A false one is what harness/aprender.ts collects into the list of things to fix.",
+    "24": "The arguments spell out the shape of a score: which conversation, what you are judging, whether it passed, and an optional comment.",
+    "25": "Creates the score, and note there is no await: it is fire and forget, so a slow dashboard never slows the bot. `comentario.slice(0, 500)` keeps a long error from being rejected by the API.",
+    "28": "Why this function has to exist: traces leave in batches, so a short-lived program would end with the last batch still waiting.",
+    "29": "Called at the end of harness/avaliar.ts, just before the process exits.",
+    "30": "Flushes the scores.",
+    "31": "Flushes the spans. Both are awaited, because the point is to finish before the program closes."
+  }
+}

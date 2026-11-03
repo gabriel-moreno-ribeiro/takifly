@@ -1,0 +1,92 @@
+{
+  "file": "grafo.ts",
+  "blocks": [
+    {
+      "from": 1,
+      "to": 3,
+      "note": "A learning exercise, kept as a record. Nothing imports it, and deleting it would not change the bot. It is worth keeping because it is the smallest possible version of what harness/agente.ts does: one state, one step, one drawing, and no AI anywhere."
+    },
+    {
+      "from": 4,
+      "to": 7,
+      "note": "writeFile for the drawing at the end, and the four LangGraph pieces: Annotation builds the state, StateGraph builds the graph, and START and END are the two markers every path begins and ends at."
+    },
+    {
+      "from": 8,
+      "to": 13,
+      "note": "The state, with one field. This is the same mechanism as the twelve-field state in harness/agente.ts, stripped to the bone: Annotation.Root describes the folder that travels from step to step, and each field says what it holds."
+    },
+    {
+      "from": 14,
+      "to": 20,
+      "note": "A step is a plain function: it receives the folder and returns only what it wants to change. Returning { texto: ... } replaces that one field and leaves everything else alone. That return-only-what-changed contract is the heart of LangGraph, and every node in harness/agente.ts follows it."
+    },
+    {
+      "from": 21,
+      "to": 28,
+      "note": "Drawing the path. addNode gives the step a name, the two addEdge calls connect START to it and it to END, and compile() validates the shape. The idea worth taking away is on line 23: nothing has run yet. You draw first, then run, which is what makes the real graph in harness/agente.ts possible to check and to render as a picture."
+    },
+    {
+      "from": 29,
+      "to": 32,
+      "note": "invoke runs the whole graph and gives you the final state. The real bot uses stream instead, which runs the same graph but hands back each step as it finishes, and that is what makes the live progress notes in Slack possible."
+    },
+    {
+      "from": 33,
+      "to": 38,
+      "note": "LangGraph can describe itself. getGraphAsync returns that description and drawMermaid turns it into Mermaid, a diagram language made of plain text. Because the drawing is generated from the real graph, it can never drift out of date with the code."
+    },
+    {
+      "from": 39,
+      "to": 48,
+      "note": "A minimal HTML page holding that Mermaid text, with the Mermaid renderer loaded from a CDN. The page is drawn in your browser, so nothing about the graph is uploaded anywhere. harness/agente.ts does exactly the same thing at the end of the file to produce harness/agente.html."
+    },
+    {
+      "from": 49,
+      "to": 50,
+      "note": "Writes the page next to the file and tells you where it went. Open it with \"open grafo.html\"."
+    }
+  ],
+  "lines": {
+    "1": "Step 15 of the course: the smallest graph that still runs, with one node and no model call, so the machinery is visible on its own.",
+    "2": "An empty comment line, used here to separate the title from the how-to-run line below.",
+    "3": "The command to run it. The path matters: Node resolves the imports below from the folder you are standing in.",
+    "5": "Brings in `writeFile` from Node itself, used at line 49 to save the drawing. `node:fs/promises` is the version that returns promises, so it works with await.",
+    "7": "The four pieces of LangGraph used here. `Annotation` describes the state, `StateGraph` builds the graph, and `START` and `END` are the two fixed ends every graph has.",
+    "9": "A banner comment. The file is written in four marked sections so you can see where the state ends and the graph begins.",
+    "10": "The idea in one sentence: the state is a folder that each step receives and hands on.",
+    "11": "`Annotation.Root` declares the shape of that folder. The result, `Estado`, is both a value you pass to `StateGraph` and a type you use at line 17.",
+    "12": "The folder has one field, a text. `Annotation<string>` says what it holds and, by default, that a step returning this field replaces it rather than adding to it.",
+    "15": "A banner comment: what follows is the only step of the graph.",
+    "16": "The contract of every node in LangGraph: it takes the whole state and returns only the fields it wants changed.",
+    "17": "Declares the step as an ordinary function. `typeof Estado.State` is how you say \"the type of that folder\" without writing it out twice.",
+    "18": "Prints what arrived, which is what makes the handover visible when you run it.",
+    "19": "Returns only `texto`, in capitals. It never changes `estado` itself: LangGraph takes this object and merges it into the state.",
+    "22": "A banner comment: from here on the path is drawn, which is a separate thing from walking it.",
+    "23": "The point worth remembering: these lines build a description. Nothing executes until line 31.",
+    "24": "Creates the builder, telling it which state shape to carry. The next four lines chain onto it, so the whole graph is one expression.",
+    "25": "Registers the function as a step and gives it a name. That name is what the edges below refer to.",
+    "26": "The first arrow: the run starts at `START` and goes into the step.",
+    "27": "The second arrow: after the step, the run reaches `END` and stops.",
+    "28": "`compile()` checks the drawing is a valid graph (reachable, no loose ends) and returns something you can actually run.",
+    "30": "A banner comment: the drawing stops, the run starts.",
+    "31": "Runs the graph with the first state. `invoke` returns the final state, which is why the result has the same fields the folder has. `await` at the top level works because package.json sets \"type\": \"module\".",
+    "32": "Prints the final state, which is now in capitals: proof that the step's return value was merged back in.",
+    "34": "A banner comment: the last section turns the graph into a picture.",
+    "35": "What Mermaid is, in one line: a way of writing diagrams as text, which is why a graph can describe itself.",
+    "36": "Asks LangGraph for the description of its own graph. It is async because a graph can hold subgraphs that have to be resolved first.",
+    "37": "Turns that description into Mermaid text, a few lines saying which box points at which.",
+    "38": "Prints it. `\\n` is a line break, so the diagram starts on its own line in the terminal.",
+    "40": "Why a local file instead of a website: the page fetches the Mermaid program, but your graph text stays on your Mac.",
+    "41": "Starts the page. Backticks make a template literal, which can span lines and can hold `${...}` placeholders.",
+    "42": "Tells the browser the file is UTF-8, which is what keeps accented characters from turning into noise.",
+    "43": "The browser tab's title.",
+    "44": "The diagram itself. `${textoDoDesenho}` drops the Mermaid text in here, and the class is what Mermaid looks for when it starts.",
+    "45": "Opens a script block. `type=\"module\"` is required for the import on the next line to be allowed in a browser.",
+    "46": "Loads Mermaid from a public CDN, with the version pinned, so the page keeps working the same way tomorrow.",
+    "47": "Starts Mermaid. `startOnLoad: true` makes it find every `.mermaid` element on the page and draw it.",
+    "48": "Closes the script, and the backtick ends the page text.",
+    "49": "Writes the page next to the file. `await` matters: without it the program could end before the write finished.",
+    "50": "Tells you where to look, which is the last thing the program does."
+  }
+}

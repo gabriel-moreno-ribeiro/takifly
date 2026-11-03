@@ -1,0 +1,174 @@
+{
+  "file": "harness/monitor.ts",
+  "blocks": [
+    {
+      "from": 1,
+      "to": 6,
+      "note": "The part that works while nobody is talking to the bot, and the only path where it speaks first. Line 3 is the design point: no AI here, just code comparing numbers, so a check costs no credit and the model has no way to invent a price drop. Line 4 explains the two different clocks below. You can run it once by hand with \"node harness/monitor.ts\" and the alerts print to the terminal instead of Slack."
+    },
+    {
+      "from": 7,
+      "to": 9,
+      "note": "The storage functions from harness/dados.ts and three helpers from harness/ferramentas.ts. precoAtual is the one that does the real work: it prices both legs across every airport and returns null for \"no flights\" or throws for \"could not find out\", and the rest of this file is built on that distinction."
+    },
+    {
+      "from": 10,
+      "to": 14,
+      "note": "Four constants, each with its reason. Six hours between checks of the same watch, because the search is unofficial and searching too often invites a block. One hour between clock ticks, which is how often it looks for work. Five seconds between watches in the same run, for the same reason as the six hours. Four failures before warning you, which at six hours apart is about a day of silence."
+    },
+    {
+      "from": 15,
+      "to": 17,
+      "note": "Any function taking a conversation and a text. bot.ts passes one that posts to Slack, the bottom of this file passes one that prints, and teste.ts passes one that records calls into an array. That single type is why the whole watcher is testable without Slack."
+    },
+    {
+      "from": 18,
+      "to": 21,
+      "note": "Checking one watch. It pulls out the five fields the decision needs and builds the description once, since it appears in every possible message below."
+    },
+    {
+      "from": 22,
+      "to": 28,
+      "note": "The expiry case first: if the travel date is before today in São Paulo, it tells you it is stopping, sets ativo to 0 and returns. Without this, a trip that already happened would be re-priced forever, costing searches for nothing."
+    },
+    {
+      "from": 29,
+      "to": 40,
+      "note": "The failure case. precoAtual throwing means \"could not find out\", not \"no flights\". The count goes up, the reason is logged, and line 37 messages you only when the count hits exactly four. Using == rather than >= is deliberate: you get that warning once, not every six hours. The comment explains why the warning exists at all: failing silently would be the worst outcome, because you would assume the price simply had not dropped."
+    },
+    {
+      "from": 41,
+      "to": 45,
+      "note": "A null price means there are genuinely no flights on that route right now. That is not a failure, so the failure count resets, the timestamp is stamped, and nothing is sent. Telling you about an empty route every six hours would be noise."
+    },
+    {
+      "from": 46,
+      "to": 48,
+      "note": "Two lines holding the whole decision. novoMenor is the lowest total ever seen, or today's if there was none. bomPreco: with a target, good means at or below it; without a target, good means strictly below the previous low, and only when a previous low exists, which is what stops the very first check firing an alert about a price you just asked to watch."
+    },
+    {
+      "from": 49,
+      "to": 54,
+      "note": "The not-good-enough path: store the new low, reset the failures, stamp the time, and do one subtle thing. With a target set, avisado_preco is cleared back to null, and the comment says why: the price went back up, so the next time it drops below your target deserves a fresh alert."
+    },
+    {
+      "from": 55,
+      "to": 62,
+      "note": "The alert, with a guard that only fires on real news: either you were never told, or the price is now below what you were last told. That is what stops the same good price alerting every six hours forever. Then the reason is built, either \"your target is R$ X\" or \"it was R$ Y\", the buy links are attached, and line 61 records avisado_preco only after the message was sent. The comment states the ordering rule: if Slack fails, nothing is recorded and the next check tries again."
+    },
+    {
+      "from": 63,
+      "to": 64,
+      "note": "After a successful check, the low is stored, the failure count cleared and the time stamped, which is what puts this watch six hours out from now."
+    },
+    {
+      "from": 65,
+      "to": 68,
+      "note": "The run over all watches. Line 68 lists every active one and keeps those last checked six or more hours ago. That one filter is why a Mac that was asleep catches up by itself: there is no schedule to miss, only a question of what is overdue."
+    },
+    {
+      "from": 69,
+      "to": 79,
+      "note": "The loop wraps each watch in its own try, and the comment gives the reason: a failing Slack call on one watch must not stop the others. Line 76 waits between watches to space out the searches. It returns how many were due, which the caller logs. Both \"now\" and the wait are parameters with defaults, which is how teste.ts can pass a fake clock and zero delay and test six hours of behaviour instantly."
+    },
+    {
+      "from": 80,
+      "to": 83,
+      "note": "The clock. \"rodando\" is a plain boolean lock, and it exists because a slow run must not have a second one start on top of it: two runs would both see the same overdue watches and alert twice."
+    },
+    {
+      "from": 84,
+      "to": 94,
+      "note": "One tick: return immediately if a run is in progress, otherwise take the lock, run the checks inside a try, log how many were done, and release the lock. The try matters because an unhandled rejection here would leave the lock stuck on and the watcher silently dead."
+    },
+    {
+      "from": 95,
+      "to": 97,
+      "note": "Call it once right away, so starting the bot checks anything already overdue, then every hour from then on. setInterval keeps a reference that holds the process alive, which is fine here because the Slack socket is doing that anyway."
+    },
+    {
+      "from": 98,
+      "to": 103,
+      "note": "Terminal use: run the checks once with a callback that prints instead of posting, and report the count. This is how you watch the logic work without waiting six hours or touching Slack."
+    }
+  ],
+  "lines": {
+    "1": "What this file is: the routine that checks prices on its own and speaks up in Slack.",
+    "2": "An empty comment line.",
+    "3": "The point worth keeping: there is no model here, only code comparing numbers. It costs nothing per check and it cannot invent a price drop.",
+    "4": "Why the clock and the interval are separate: it wakes hourly but only checks what is six hours stale, so a Mac that was asleep catches up by itself instead of skipping a day.",
+    "5": "An empty comment line.",
+    "6": "How to run one check by hand, which is what the block at line 100 is for.",
+    "8": "The three things it needs from storage: reading the watches, updating one, and the row type.",
+    "9": "Three helpers from the tool file: today's date in São Paulo, a sentence describing a watch, and the price lookup. Sharing `precoAtual` is what keeps a watch and a search from pricing a trip differently.",
+    "11": "Six hours between checks, with the reason in the comment: the search is not an official API, and hammering it risks a block.",
+    "12": "The clock ticks hourly, which is what makes catching up possible.",
+    "13": "Five seconds between watches, so ten watches do not arrive as ten searches at once.",
+    "14": "Four failures, about a day, before the person is told it is stuck.",
+    "16": "The shape of the \"speak\" function. The watcher never imports Slack: whoever starts it hands over a way to talk, which is what lets the terminal run at line 101 print instead.",
+    "18": "A banner comment: one watch at a time.",
+    "19": "Checks a single watch. `agora` is passed in rather than read here, so every watch in one pass shares the same clock and a test can fix the time.",
+    "20": "Pulls out the five fields used below, which keeps the comparisons readable.",
+    "21": "The human sentence for this watch, built once and reused in all three messages.",
+    "23": "Why the next check comes first: a trip in the past has nothing left to watch.",
+    "24": "Compares dates as text, which works because both are written 2026-03-12.",
+    "25": "Says why it is stopping. Going quiet would look like a bug.",
+    "26": "Turns the watch off.",
+    "27": "Stops here: no search, no cost.",
+    "30": "Declared outside the try so it is still in scope afterwards.",
+    "31": "The search can fail, so it is guarded.",
+    "32": "The real price lookup, the same one the search tool uses.",
+    "33": "Catches the failure, keeping the message for the alert below.",
+    "34": "One more failure than before.",
+    "35": "Logs it with the count, which is what you read when a watch misbehaves.",
+    "36": "Why it tells on itself: failing silently is the worst case, because the person would assume the price simply never dropped.",
+    "37": "Warns exactly once, on the fourth failure. Using `===` rather than `>=` is what keeps it from warning every six hours after that.",
+    "38": "Saves the count and the time, so the next pass knows how long this has been going on.",
+    "39": "Stops: there is no price to compare.",
+    "42": "A null price means the search worked and found nothing, which is not a failure.",
+    "43": "Resets the failure count and records the check.",
+    "44": "Nothing to announce.",
+    "47": "The new low: the current price on the first ever check, otherwise the smaller of the two.",
+    "48": "What counts as a good price: with a target, being at or under it; with no target, beating the previous low. The `menor_preco !== null` part is what stops the very first check from announcing itself.",
+    "50": "Why the target case clears the announced price below: the price went back up, so the next drop deserves to be reported again.",
+    "51": "The ordinary case, which is most checks.",
+    "52": "Saves the new low and the time, and for a target watch forgets what was announced.",
+    "53": "Done, nothing said.",
+    "56": "Why the update is split in two below: the save only happens after Slack accepted the message, so a failed alert is retried on the next pass instead of being lost.",
+    "57": "Announce only if this is news: nothing announced yet, or cheaper than what was.",
+    "58": "The reason, in the person's own terms: their target, or the price it used to be.",
+    "59": "The booking links, with the return leg included when there is one. `filter(Boolean)` drops the missing one.",
+    "60": "The alert itself, with the price in bold and the links under it.",
+    "61": "Records what was announced, and only now, which is the point of line 56.",
+    "63": "Saves the low, clears the failures and stamps the time, for every path that got a price.",
+    "66": "A banner comment: the whole pass.",
+    "67": "Checks everything that is due. The two defaults are what a test overrides to control time and skip the waiting.",
+    "68": "The due ones: last checked more than six hours ago. A new watch has 0 there, so it is checked immediately.",
+    "69": "One at a time, never in parallel, which is deliberate for a search that can block you.",
+    "70": "Each watch is guarded on its own.",
+    "71": "Checks this one watch, awaited so the five second pause below really separates two searches.",
+    "72": "Catches anything, usually Slack rather than the search.",
+    "73": "The rule: one broken watch must not stop the rest.",
+    "74": "Logs which watch and why.",
+    "76": "Waits between watches. Wrapping `setTimeout` in a promise is the standard way to sleep in async code.",
+    "78": "Returns how many were checked, which the clock below uses to decide whether to log anything.",
+    "81": "A banner comment: the clock.",
+    "82": "Called once at the end of bot.ts, with the Slack-posting function.",
+    "83": "The guard flag, with the reason beside it: a slow pass must not have a second one start on top of it.",
+    "84": "One tick of the clock.",
+    "85": "Still running: skip this tick entirely.",
+    "86": "Claims the flag.",
+    "87": "Guarded so a failure cannot leave the flag stuck true.",
+    "88": "Does the pass.",
+    "89": "Logs only when something was actually checked, so an idle bot stays quiet.",
+    "90": "Catches anything the pass threw.",
+    "91": "Logs it, and the tick ends normally.",
+    "93": "Releases the flag, in both the good and the bad case, which is why it sits after the try.",
+    "95": "One pass right away, so starting the bot catches up on anything overdue instead of waiting an hour.",
+    "96": "Then every hour, forever. `setInterval` keeps the process alive, which is fine: the bot is meant to stay up.",
+    "99": "A banner comment: running it by hand.",
+    "100": "True only when this file is the one you ran, so importing it from bot.ts does not trigger a check.",
+    "101": "One pass with a printing function in place of Slack, which is how you test a watch without posting to a channel.",
+    "102": "Prints how many were checked."
+  }
+}
