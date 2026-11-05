@@ -146,7 +146,7 @@ nenhuma pesquisa nova.
 | ~~35~~ | **feito.** O monitor de preço virou um grafo: 5 nós, com `retryPolicy` na busca e trace no Langfuse | grafo invocado de fora, `retryPolicy`, `errorHandler` |
 | ~~36~~ | **não precisa.** O `ChatOpenAI` já tenta de novo sozinho até 6 vezes. `retryPolicy` em cima disso daria 18 chamadas | — |
 | 37 | A planilha e a coleta de voos viram nós, com cache | cache de nó |
-| 38 | O grafo para e pergunta a data que faltou | `interrupt()` |
+| 38 | O grafo para e pergunta a data que faltou. Só pesquisa quando cada trecho tem origem, destino e data | `interrupt()` |
 | 39 | Os quatro especialistas de hoje viram subgrafos | subgrafo, `Command` |
 | ~~40~~ | **feito, e com dado real.** `sources/hotels.ts` lê hotel de verdade do Google Hotels (nome, nota, avaliações, comodidades). O que ele NÃO consegue é o preço das datas pedidas | serve de molde |
 | 41 | Voo e hotel ao mesmo tempo, e as opções esperando os dois | `Send`, `defer` |

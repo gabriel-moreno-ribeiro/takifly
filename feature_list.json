@@ -1,6 +1,6 @@
 {
 	"project": "takifly",
-	"last_updated": "2026-11-04",
+	"last_updated": "2026-11-05",
 	"states": [
 		"not_started",
 		"active",
@@ -245,11 +245,11 @@
 		{
 			"id": "F13",
 			"area": "brain",
-			"behavior": "Quando falta a data ou há dois aeroportos com o mesmo nome, o grafo para, pergunta e continua de onde parou.",
-			"verification": "grep -q 'interrupt(' brain/graph.ts && node quality/exam.ts monitor-sem-data",
+			"behavior": "O bot só pesquisa quando cada trecho tem origem, destino e data. Se faltar algo, o código percebe, o grafo para e pergunta, e continua do mesmo ponto quando a pessoa responde. Antes disso nenhum especialista nem busca no Google roda.",
+			"verification": "grep -q \"interrupt(\" brain/graph.ts && node quality/exam.ts fala-so && node quality/exam.ts sem-data && node quality/exam.ts sem-origem && node quality/exam.ts data-qualquer-dia",
 			"state": "not_started",
 			"evidence": "",
-			"notes": "AGENCIA passo 38"
+			"notes": "AGENCIA passo 38. Regra pedida pela pessoa em 2026-11-05: pesquisar e gastar tokens só com o mínimo de informação. Ideia: o Plano do orquestrador (brain/agents.ts) passa a trazer os trechos, e um nó de código confere se cada um está completo antes de qualquer especialista. Ler o pedido ainda custa a chamada do orquestrador. A prova custa crédito: 7 cenários"
 		},
 		{
 			"id": "F14",
@@ -508,8 +508,8 @@
 			"area": "infra",
 			"behavior": "Reorganização em pastas commitada.",
 			"verification": "test -z \"$(git status --short)\" && node quality/tests.ts",
-			"state": "active",
-			"evidence": "",
+			"state": "passing",
+			"evidence": "2026-11-05, commit 2b05fcb: Tudo certo!",
 			"notes": "FUTURE 8 'Commit': nada commitado depois de ecda5f3; inclui os arquivos de harness criados em 04/11"
 		},
 		{
