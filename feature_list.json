@@ -1,0 +1,534 @@
+{
+	"project": "takifly",
+	"last_updated": "2026-11-04",
+	"states": [
+		"not_started",
+		"active",
+		"blocked",
+		"passing"
+	],
+	"features": [
+		{
+			"id": "H01",
+			"area": "harness",
+			"behavior": "AGENTS.md é um mapa dos docs e todo arquivo em docs/ começa com o cabeçalho OKF (type, title, description, tags).",
+			"verification": "grep -q 'MAPA DOS DOCS' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-04, commit ecda5f3 com mudanças sem commit: Tudo certo!",
+			"notes": "aulas 03 e 04; o bloco MAPA DOS DOCS do tests.ts confere"
+		},
+		{
+			"id": "H02",
+			"area": "harness",
+			"behavior": "npm test não abre os bancos do bot em serviço: MEMORIA e DADOS são :memory: antes de carregar o grafo.",
+			"verification": "grep -q 'process.env.MEMORIA = ' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-04, commit ecda5f3 com mudanças sem commit: Tudo certo!",
+			"notes": "aulas 09 e 10"
+		},
+		{
+			"id": "H03",
+			"area": "harness",
+			"behavior": "feature_list.json é validado a cada npm test: campos obrigatórios, estados válidos, no máximo um active e passing com evidência.",
+			"verification": "grep -q 'LISTA DE FUNCIONALIDADES' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-04, commit ecda5f3 com mudanças sem commit: Tudo certo!",
+			"notes": "aula 08"
+		},
+		{
+			"id": "H04",
+			"area": "harness",
+			"behavior": "bash init.sh confere Node, dependências, chaves do .env e testes, e mostra git e serviços.",
+			"verification": "bash init.sh",
+			"state": "passing",
+			"evidence": "2026-11-04, commit ecda5f3 com mudanças sem commit: watcher.ts  rodando (processo 49699)",
+			"notes": "aula 06"
+		},
+		{
+			"id": "H05",
+			"area": "harness",
+			"behavior": "node quality/verify-feature.ts <id> roda a verificação do item e só com saída 0 grava passing e a evidência.",
+			"verification": "manual: rodar o script num item cuja verificação falha (o estado não muda, sai com 1) e num que passa (vira passing com data, commit e última linha)",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 08. Autoteste em 2026-11-04: recusou H07 (falha), F05 (manual) e um id inexistente sem mexer na lista, e promoveu H01 a H04 e H06. Falta a pessoa confirmar e registrar"
+		},
+		{
+			"id": "H06",
+			"area": "harness",
+			"behavior": "A prova sai com código 1 quando algum cenário falha ou quando nenhum cenário rodou.",
+			"verification": "grep -q 'process.exit(aprovados === selecionados.length' quality/exam.ts",
+			"state": "passing",
+			"evidence": "2026-11-04, commit ecda5f3 com mudanças sem commit: saída 0",
+			"notes": "aula 09; sem isso o verify-feature promoveria uma prova reprovada"
+		},
+		{
+			"id": "H07",
+			"area": "harness",
+			"behavior": "node takifly.ts restart roda node quality/tests.ts antes e se recusa a reiniciar se não terminar em Tudo certo!.",
+			"verification": "grep -q 'quality/tests.ts' takifly.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 08: a regra do README vira código; custa ~70 s por restart. Mexe no que reinicia os serviços: testar só com a pessoa"
+		},
+		{
+			"id": "H08",
+			"area": "harness",
+			"behavior": "rules/, sources/ e storage/ não importam brain/ (hojeEmSaoPaulo e somarDias vão para rules/), e um teste confere.",
+			"verification": "test -z \"$(grep -rl 'from \"../brain/' rules sources storage)\" && grep -q 'FRONTEIRAS' quality/tests.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 10; hoje rules/rules.ts e sources/hotels.ts importam brain/tools.ts"
+		},
+		{
+			"id": "H09",
+			"area": "harness",
+			"behavior": "node quality/scoreboard.ts roda sem erro e não mistura os 10 mil cenários com a prova de 284.",
+			"verification": "node quality/scoreboard.ts > /dev/null",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "hoje soma 10049/10284 para o glm-5.3 e quebra com TypeError ao ler o .estilo.jsonl"
+		},
+		{
+			"id": "H10",
+			"area": "harness",
+			"behavior": "O cabeçalho de brain/graph.ts mostra o laço do especialista e um teste confere que os nós do grafo batem com ele; brain/graph.html é regerado.",
+			"verification": "grep -q 'A PLANTA DO GRAFO' quality/tests.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 14; hoje graph.html não tem o nó situacao"
+		},
+		{
+			"id": "H11",
+			"area": "harness",
+			"behavior": "brain/price-watch.html sai do git e entra no .gitignore, como o graph.html.",
+			"verification": "test -z \"$(git ls-files brain/price-watch.html)\" && git check-ignore -q brain/price-watch.html",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 12: arquivo gerado misturado com fonte"
+		},
+		{
+			"id": "H12",
+			"area": "harness",
+			"behavior": "Um workflow do GitHub roda node quality/tests.ts em todo push.",
+			"verification": "test -f .github/workflows/tests.yml && grep -q 'node quality/tests.ts' .github/workflows/tests.yml",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 12; precisa de touch .env no CI, porque o grafo lê o .env ao ser importado"
+		},
+		{
+			"id": "H13",
+			"area": "harness",
+			"behavior": "Auditoria das 14 regras do redator: cada uma marcada como fato conferido por código, segurança, produto ou estilo, e as redundantes medidas com a prova antes de sair.",
+			"verification": "manual: comentário acima de instrucoesDoRedator com uma linha por regra; cada regra removida tem a nota da prova antes e depois em docs/progress.md",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 04"
+		},
+		{
+			"id": "H14",
+			"area": "harness",
+			"behavior": "Um interruptor só da prova desliga o verificador e grava a nota à parte, para medir quanto ele vale.",
+			"verification": "grep -q 'SEM_VERIFICADOR' quality/exam.ts brain/graph.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 02 (teste de exclusão); gasta crédito para medir"
+		},
+		{
+			"id": "F01",
+			"area": "brain",
+			"behavior": "O orquestrador monta o plano e cada especialista (memoria, monitor, pesquisador, analista) só vê as próprias ferramentas; contas e filtros são código.",
+			"verification": "node quality/exam.ts filtro",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (OS AGENTES, AS FERRAMENTAS); prova de 30/10 e 10k (busca 1297/1300, conta 473/500); commits 6ae00c1, f52b5ee",
+			"notes": "brain/graph.ts, brain/agents.ts, brain/tools.ts"
+		},
+		{
+			"id": "F02",
+			"area": "brain",
+			"behavior": "Preço, duração, horário ou link que não veio das ferramentas não chega ao Slack; resposta recusada volta ao redator até 2 vezes e depois cai na emergência.",
+			"verification": "node quality/exam.ts ataque",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (O VERIFICADOR); 10k ataque 240/250, falha 149/150; commits 7958d30, 8d4d8b4",
+			"notes": "brain/checker.ts"
+		},
+		{
+			"id": "F03",
+			"area": "brain",
+			"behavior": "O vigia (processo próprio) confere cada monitoramento a cada 2 h sem IA, avisa no Slack só novidade boa e grava o preço.",
+			"verification": "node quality/exam.ts monitor",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (os 3 blocos MONITORAMENTO); 10k monitoramento 598/600; commits 6ae00c1, ecda5f3; watcher.ts ainda sem commit",
+			"notes": "watcher.ts, brain/price-watch.ts"
+		},
+		{
+			"id": "F04",
+			"area": "brain",
+			"behavior": "Um roteiro vira PDF de 10 a 15 páginas pelo Chrome, e o número de páginas é decisão do código.",
+			"verification": "node brain/document.ts",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: autoteste de brain/document.ts gerou results/roteiro-exemplo.pdf em 02/11; commit ecda5f3",
+			"notes": "precisa do Google Chrome instalado"
+		},
+		{
+			"id": "F05",
+			"area": "brain",
+			"behavior": "Cada pedido vira um trace no Langfuse (sessão por conversa, tag do modelo, scores) e failures.ts junta o que deu errado.",
+			"verification": "manual: node quality/exam.ts fala-so-oi e conferir a sessão no painel do Langfuse; node quality/failures.ts grava results/melhorias.md",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: results/melhorias.md de 30/10; commits 8b5a99c, dd53b1e, 22f0824",
+			"notes": "os 10 mil rodaram sem Langfuse"
+		},
+		{
+			"id": "F06",
+			"area": "brain",
+			"behavior": "Um modelo barato escreve uma seção do PDF por vez a partir de brain/sections.ts.",
+			"verification": "test -f brain/sections.ts && node brain/document.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 1.1 e 1.2; depende de F04"
+		},
+		{
+			"id": "F07",
+			"area": "brain",
+			"behavior": "Gerar o PDF sobrevive a uma queda no meio: retoma da última seção em vez de refazer as anteriores.",
+			"verification": "manual: matar o processo (kill -9) no meio das seções e rodar de novo; o Langfuse mostra só as seções que faltavam",
+			"state": "blocked",
+			"evidence": "",
+			"notes": "FUTURE 1.3; bloqueado por F06"
+		},
+		{
+			"id": "F08",
+			"area": "brain",
+			"behavior": "Agente guia com uma ferramenta, read_travel_guide(city, topic), responde 'como saio do aeroporto' e 'o que fazer lá' sem inventar.",
+			"verification": "grep -q 'read_travel_guide' brain/tools.ts && node quality/exam.ts guia",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 2.2 e 2.3; depende de F27"
+		},
+		{
+			"id": "F09",
+			"area": "brain",
+			"behavior": "pesquisador, memoria e analista viram dois especialistas cada (hospedagem, documentos, comparador), com 2 a 4 ferramentas cada.",
+			"verification": "grep -q \"hospedagem: {\" brain/agents.ts && node quality/tests.ts && CENARIOS=10k AMOSTRA=240 node quality/exam.ts hotel",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 3.1"
+		},
+		{
+			"id": "F10",
+			"area": "brain",
+			"behavior": "Nomes de ferramentas e campos em inglês só na camada que o modelo lê (search_flights(origin, destination, date)).",
+			"verification": "grep -q 'search_flights' brain/tools.ts && node quality/tests.ts && node quality/exam.ts data",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 3.2 e 3.4"
+		},
+		{
+			"id": "F11",
+			"area": "brain",
+			"behavior": "Limites saem da medição: maxPorPedido ajustados, dia_da_semana e listar_trechos apagadas se ninguém as chama, limite de 7 dias decidido.",
+			"verification": "manual: contar no Langfuse as chamadas de dia_da_semana e listar_trechos; registrar a decisão em docs/AGENCIA.md",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 3.3, 7.4 e 7.5"
+		},
+		{
+			"id": "F12",
+			"area": "brain",
+			"behavior": "A planilha e a coleta viram nós com cache: a mesma busca não volta ao Google em poucos minutos.",
+			"verification": "grep -q 'cachePolicy' brain/graph.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "AGENCIA passo 37"
+		},
+		{
+			"id": "F13",
+			"area": "brain",
+			"behavior": "Quando falta a data ou há dois aeroportos com o mesmo nome, o grafo para, pergunta e continua de onde parou.",
+			"verification": "grep -q 'interrupt(' brain/graph.ts && node quality/exam.ts monitor-sem-data",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "AGENCIA passo 38"
+		},
+		{
+			"id": "F14",
+			"area": "brain",
+			"behavior": "Cada especialista vira um subgrafo, e um Command decide para onde ir.",
+			"verification": "grep -q 'Command' brain/graph.ts && node quality/tests.ts && node quality/exam.ts filtro",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "AGENCIA passo 39; vale depois de F09"
+		},
+		{
+			"id": "F15",
+			"area": "brain",
+			"behavior": "Voo e hotel são pesquisados ao mesmo tempo (Send) e um nó espera os dois (defer) para montar 2 ou 3 roteiros com o total.",
+			"verification": "grep -q 'new Send' brain/graph.ts && CENARIOS=10k AMOSTRA=240 node quality/exam.ts hotel",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "AGENCIA passo 41; antes, trocar o reducer dos campos escritos em paralelo"
+		},
+		{
+			"id": "F16",
+			"area": "brain",
+			"behavior": "Dá para ver o estado depois de cada nó de um pedido antigo (getStateHistory).",
+			"verification": "grep -q 'getStateHistory' brain/graph.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 4"
+		},
+		{
+			"id": "F17",
+			"area": "brain",
+			"behavior": "O vigia deixa de depender de brain/tools.ts, avisa também por e-mail, e o caminho 'Slack recusou o aviso' tem teste.",
+			"verification": "test -z \"$(grep -l 'from \"./tools.ts\"' brain/price-watch.ts)\" && grep -q 'não aceitou' quality/tests.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 5.1, 5.2 e 5.3"
+		},
+		{
+			"id": "F18",
+			"area": "brain",
+			"behavior": "Validade do passaporte e data de nascimento saem mascaradas nos traces do Langfuse.",
+			"verification": "grep -q 'mascarar' brain/tracing.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 6.1"
+		},
+		{
+			"id": "F19",
+			"area": "brain",
+			"behavior": "O verificador também pega 'monitoramento criado' e 'guardei' falsos em inglês e espanhol.",
+			"verification": "grep -q 'I created' quality/tests.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 6.3"
+		},
+		{
+			"id": "F20",
+			"area": "brain",
+			"behavior": "O convite para contar os documentos sai uma vez por conversa, com teste; o redator para de explicar a conta do custo-benefício em toda resposta.",
+			"verification": "grep -q 'convidou' quality/tests.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 7.2; o convite já está no código (campo convidou), falta o teste; a escrita se mede com quality/style-judge.ts"
+		},
+		{
+			"id": "F21",
+			"area": "brain",
+			"behavior": "Pedido lento mostra no Slack cada passo (especialista, busca, análise), não só 'Pesquisando'.",
+			"verification": "grep -q 'export function descreverChamada' brain/graph.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 7.3"
+		},
+		{
+			"id": "F22",
+			"area": "brain",
+			"behavior": "'2 adultos' deixa de contar como 'dia 2' na trava contra data inventada.",
+			"verification": "grep -q '2 adultos' quality/tests.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "shortcut em brain/tools.ts:144"
+		},
+		{
+			"id": "F23",
+			"area": "brain",
+			"behavior": "bot.ts e watcher.ts conferem o .env ao ligar e saem com uma linha dizendo o que falta, em vez de um stack trace.",
+			"verification": "manual: com os serviços parados e numa cópia da pasta, mover o .env e rodar node bot.ts: uma linha, código 1",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 06"
+		},
+		{
+			"id": "F24",
+			"area": "brain",
+			"behavior": "Cada linha de log do grafo, do bot e do vigia sai com hora e id da conversa; takifly.ts status diz se o bot está conectado ao Slack.",
+			"verification": "grep -q 'Takifly ligado no Slack' takifly.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 11"
+		},
+		{
+			"id": "F25",
+			"area": "brain",
+			"behavior": "A reação 👍/👎 da pessoa a uma resposta vira score no Langfuse.",
+			"verification": "grep -q 'reaction_added' bot.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 14 (âncoras)"
+		},
+		{
+			"id": "F26",
+			"area": "brain",
+			"behavior": "O especialista só sai do plano com \"pronto\" se fez o que lhe cabia: o pesquisador precisa ter feito uma busca neste pedido.",
+			"verification": "grep -q \"export function terminou\" brain/graph.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "aula 07; docs/lessons-ibm.md (condição de parada verificável). Hoje criarEspecialista sai por contagem (PASSOS_POR_AGENTE) ou por \"pronto\""
+		},
+		{
+			"id": "F30",
+			"area": "sources",
+			"behavior": "Pesquisa voos de verdade no Google Flights com passageiros e classe; data ou lugar inventado nem chega ao Google.",
+			"verification": "node quality/exam.ts data",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (O PEDIDO AO GOOGLE, LER A PÁGINA DO GOOGLE, DATAS, CLASSES); 10k ida-e-volta 700/700; commits 7eacab7, 34cbd6b",
+			"notes": "sources/flights.ts"
+		},
+		{
+			"id": "F31",
+			"area": "sources",
+			"behavior": "Pesquisa hotéis de verdade no Google Hotels e avisa que o preço é de referência.",
+			"verification": "CENARIOS=10k AMOSTRA=240 node quality/exam.ts hotel",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (HOSPEDAGEM); 10k hotel 390/450; commit ecda5f3",
+			"notes": "sources/hotels.ts; o preço é de uma noite nas datas que o Google escolhe"
+		},
+		{
+			"id": "F32",
+			"area": "sources",
+			"behavior": "Cada pesquisa vira uma planilha no Google Sheets, e o vigia volta na mesma planilha.",
+			"verification": "node quality/exam.ts falha-planilha",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (PLANILHA); commit 20e8d87",
+			"notes": "sources/spreadsheet.ts e spreadsheet.gs"
+		},
+		{
+			"id": "F33",
+			"area": "sources",
+			"behavior": "mandarEmail envia pela Resend; sem chave no .env só avisa no console.",
+			"verification": "node quality/exam.ts novo-email",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (E-MAIL); commit ecda5f3",
+			"notes": "sources/email.ts"
+		},
+		{
+			"id": "F34",
+			"area": "sources",
+			"behavior": "sources/guide.ts lê uma seção de uma cidade no Wikivoyage e devolve o texto limpo.",
+			"verification": "test -f sources/guide.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 2.1"
+		},
+		{
+			"id": "F35",
+			"area": "sources",
+			"behavior": "Carro, seguro e passeios ganham uma fonte cada, no molde de sources/hotels.ts.",
+			"verification": "grep -q 'buscar_carros' brain/tools.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "AGENCIA passo 44+"
+		},
+		{
+			"id": "F36",
+			"area": "sources",
+			"behavior": "Conferir conexão e bagagem trecho a trecho e dar o preço do hotel nas datas pedidas.",
+			"verification": "manual: conferirViagem devolve impede para conexão internacional de 50 min a partir de uma busca real",
+			"state": "blocked",
+			"evidence": "",
+			"notes": "bloqueado: a busca não traz perna por perna nem o preço das datas"
+		},
+		{
+			"id": "F40",
+			"area": "rules",
+			"behavior": "4133 aeroportos: nomes em qualquer idioma caem no código certo; erro de digitação vira pergunta.",
+			"verification": "node quality/exam.ts lugar",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (os blocos AEROPORTOS e ESCRITA ERRADA); 10k digitacao 245/250; commit ecda5f3",
+			"notes": "rules/airports.ts"
+		},
+		{
+			"id": "F41",
+			"area": "rules",
+			"behavior": "O nó conferir checa visto, passaporte, febre amarela e menor de idade por tabela; fora da tabela vira 'confirme no consulado'.",
+			"verification": "CENARIOS=10k AMOSTRA=240 node quality/exam.ts regras",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (REGRAS DA VIAGEM); 10k regras 300/300; commit ecda5f3",
+			"notes": "rules/rules.ts"
+		},
+		{
+			"id": "F42",
+			"area": "storage",
+			"behavior": "O bot guarda, mostra e apaga preferências e o dossiê por conversa.",
+			"verification": "node quality/exam.ts pref",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (PREFERÊNCIAS, DOCUMENTOS); 10k preferencia 300/300; commits 6ae00c1, ecda5f3",
+			"notes": "storage/database.ts"
+		},
+		{
+			"id": "F43",
+			"area": "storage",
+			"behavior": "Passaporte e preferências valem para a pessoa em qualquer canal (Store), não só na conversa.",
+			"verification": "grep -qE 'BaseStore|InMemoryStore|SqliteStore' brain/graph.ts storage/database.ts && node quality/exam.ts memoria",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "AGENCIA passo 42"
+		},
+		{
+			"id": "F50",
+			"area": "quality",
+			"behavior": "A prova roda 284 cenários com modelo de verdade e Google de mentira, e retoma de onde parou.",
+			"verification": "node quality/exam.ts fala-so-oi",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: results/*.jsonl de 30/10 com 4 modelos; commits a7bab61, 8b5a99c",
+			"notes": "quality/exam.ts"
+		},
+		{
+			"id": "F51",
+			"area": "quality",
+			"behavior": "10 mil cenários gerados por código rodaram com o glm-5.3.",
+			"verification": "node quality/scenarios-10k.ts",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: results/glm-5.3-10k.jsonl com 10000 casos, 9767 passaram, 0 erros (03/11); scenarios-10k.ts ainda sem commit",
+			"notes": "quality/scenarios-10k.ts, quality/panel.ts"
+		},
+		{
+			"id": "F52",
+			"area": "quality",
+			"behavior": "Um modelo juiz dá nota de 1 a 5 para a escrita de cada resposta da prova.",
+			"verification": "node quality/style-judge.ts --teste",
+			"state": "passing",
+			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: results/glm-5.3-10k.estilo.jsonl com 10000 notas, média 4,26 (04/11); style-judge.ts ainda sem commit",
+			"notes": "quality/style-judge.ts; gasta 2 chamadas de modelo"
+		},
+		{
+			"id": "F60",
+			"area": "docs",
+			"behavior": "docs/manual/ usa os caminhos atuais e o index.html é regerado (ou o manual é apagado, se ninguém o abre).",
+			"verification": "test -z \"$(grep -rlE 'harness/|teste\\.ts' docs/manual/notas docs/manual/build.py)\" && python3 docs/manual/build.py",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 8"
+		},
+		{
+			"id": "F61",
+			"area": "infra",
+			"behavior": "Reorganização em pastas commitada.",
+			"verification": "test -z \"$(git status --short)\" && node quality/tests.ts",
+			"state": "active",
+			"evidence": "",
+			"notes": "FUTURE 8 'Commit': nada commitado depois de ecda5f3; inclui os arquivos de harness criados em 04/11"
+		},
+		{
+			"id": "F62",
+			"area": "infra",
+			"behavior": "A pasta passagens.ts/ vira flight-bot/, com bot e vigia parados antes e religados depois.",
+			"verification": "test \"$(basename \"$PWD\")\" = flight-bot && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 8; depende de F61"
+		},
+		{
+			"id": "F63",
+			"area": "infra",
+			"behavior": "As ferramentas ligadas do REGISTRO ficam disponíveis como servidor MCP.",
+			"verification": "test -f brain/mcp.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "FUTURE 6.2; custa uma dependência nova"
+		}
+	]
+}

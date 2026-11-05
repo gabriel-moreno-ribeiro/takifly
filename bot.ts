@@ -1,20 +1,19 @@
-// bot.ts - os ouvidos e a boca do bot: recebe a mensagem no Slack, chama o grafo (harness/agente.ts) e responde
+// bot.ts - os ouvidos e a boca do bot: recebe a mensagem no Slack, chama o grafo (brain/graph.ts) e responde
 //
 // Como rodar (dentro da pasta passagens.ts/):   node bot.ts        (Ctrl+C para parar)
+// O vigia de preços é outro programa, em outro terminal:   node watcher.ts
+// Para ligar os dois de uma vez e deixar ligados (religam sozinhos se caírem):   node takifly.ts start
 
 // ---------- BIBLIOTECA ----------
 // puxa da biblioteca do Slack, as 21929129120 milhoes de bibliotecas para a biblioteca do slack funcionar e puxa apenas o que eu quero dela que é a parte de APP, ou seja, o bot em si, para ele nao apenas conseguir se conectar com o slack mas tambem conversar com ele
 import { App } from "@slack/bolt";
 
-// puxa a função responder do NOSSO arquivo harness/agente.ts (o "./" quer dizer "aqui nesta mesma pasta")
-import { responder } from "./harness/agente.ts";
-
-// puxa o relógio que confere os preços sozinho
-import { ligarMonitor } from "./harness/monitor.ts";
+// puxa a função responder do NOSSO arquivo brain/graph.ts (o "./" quer dizer "aqui nesta mesma pasta")
+import { responder } from "./brain/graph.ts";
 
 // ---------- CHAVES ----------
 // lê o arquivo .env e guarda cada chave em process.env (depois esse process.env vai dar o valor da chave API em si ao process.env.SLACK_BOT_TOKEN
-process.loadEnvFile(".env");
+process.loadEnvFile(import.meta.dirname + "/.env");
 
 // ---------- CONEXÃO COM O SLACK ----------
 const app = new App({
@@ -51,7 +50,7 @@ app.message(async ({ message, say, client }) => {
 
 	await naFila(message.channel, async () => {
 		// uma mensagem de progresso que vai sendo editada e some no fim
-		const aviso = await say(":thinking_face: Pensando...");
+		const aviso = await say(":dog: O Taki está farejando...");
 		const canal = message.channel;
 		const idDoAviso = aviso.ts!;
 
@@ -65,7 +64,7 @@ app.message(async ({ message, say, client }) => {
 			await say(resposta);
 		} catch (erro: any) {
 			console.log("Deu erro: ", erro);
-			await say("Deu erro: " + erro.message + "\nPode mandar de novo daqui a pouco: eu continuo de onde parei.");
+			await say("O Taki tropeçou: " + erro.message + "\nManda de novo daqui a pouco que eu continuo de onde parei.");
 		}
 		await client.chat.delete({ channel: canal, ts: idDoAviso }).catch(console.log);
 	});
@@ -73,8 +72,8 @@ app.message(async ({ message, say, client }) => {
 
 // ---------- LIGAR ----------
 await app.start();
-console.log("Bot ligado no Slack! Ctrl+C para desligar.");
+console.log("Takifly ligado no Slack. O Taki está de orelha em pé. Ctrl+C para desligar.");
 
 // ---------- MONITORAMENTOS ----------
-// aqui o bot fala sem ninguém ter perguntado: o aviso vai para a conversa onde o monitoramento foi criado
-ligarMonitor((conversa, texto) => app.client.chat.postMessage({ channel: conversa, text: texto }));
+// o vigia de preços NÃO roda aqui: ele é outro programa (watcher.ts), para não cair junto se o bot cair.
+// Daqui o bot só grava o monitoramento no dados.sqlite; quem confere o preço e avisa é o vigia.

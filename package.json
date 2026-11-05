@@ -1,7 +1,10 @@
 {
-  "name": "passagens-ts",
+  "name": "takifly",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "node quality/tests.ts"
+  },
   "dependencies": {
     "@langchain/core": "1.3.2",
     "@langchain/langgraph": "1.5.3",
