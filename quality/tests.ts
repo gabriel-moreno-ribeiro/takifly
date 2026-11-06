@@ -55,13 +55,19 @@ const voo: Voo = {
 	preco: 3000, duracao_min: 600, escalas: 0, saida: "10:00", chegada: "12/12 20:00", link: "https://exemplo",
 };
 const barata = { ...voo, companhia: "Barata", preco: 2000, duracao_min: 3000, escalas: 2 };
-const abas = montarAbas([voo, barata]);
+const cara = { ...voo, companhia: "Cara", preco: 9000, chegada: "13/12 06:00" };
+const noutroDia = { ...voo, data: "2026-12-10", companhia: "Antes", preco: 5000 };
+// média do 12/12 = (3000 + 2000 + 9000) / 3 = 4667; 1,5x = 7000. Só a Cara passa disso.
+// O voo de 10/12 está sozinho no trecho dele: 5000 é a própria média, então fica na aba principal.
+const abas = montarAbas([voo, cara, barata, noutroDia]);
 
-assert.deepEqual(abas.map((aba) => aba.nome), ["Resumo", "GRU→LIS 12/12"]);
-// o mais barato é a Barata, mas o melhor custo-benefício e o mais rápido são a Direta
-assert.deepEqual(abas[0].linhas[0], ["GRU→LIS 12/12", 2, 2000, "Barata", "10:00", 3000, "Direta", 3000, "10h00"]);
-assert.equal(abas[1].linhas[0][0], "Barata");    // a aba começa pela mais barata
-assert.equal(abas[1].linhas[0][4], "50h00");
+assert.deepEqual(abas.map((aba) => aba.nome), ["Voos", "Acima de 1,5x a média"]);
+assert.deepEqual(abas[0].linhas.map((linha) => linha[3]), ["Antes", "Barata", "Direta"]);    // por data, depois por preço
+assert.deepEqual(abas[1].linhas.map((linha) => linha[3]), ["Cara"]);
+const [dataVoo, , tipo, , horario, origem, destino, preco, custoBeneficio, duracao] = abas[0].linhas[1];
+assert.deepEqual([dataVoo, tipo, horario, origem, destino, preco, custoBeneficio, duracao], ["12/12/2026", "2 escalas", "10:00-20:00", "GRU", "LIS", 2000, 3900, "50h00"]);
+assert.equal(abas[0].linhas[2][2], "direto");
+assert.equal(abas[1].linhas[0][4], "10:00-13/12 06:00");    // chegou no outro dia: a data fica
 
 // ---------- CUSTO-BENEFÍCIO ----------
 assert.equal(precoEquivalente(voo), 3000 + 10 * 30);
