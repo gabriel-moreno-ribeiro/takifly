@@ -14,39 +14,34 @@ export function horas(minutos: number) {
 }
 
 // ---------- ORGANIZAR AS ABAS ----------
-// uma aba "Resumo" com uma linha por trecho, e uma aba por trecho com todos os voos
+// todos os voos numa aba só, uma linha por voo, ordenados por data e preço.
+// Os muito caros (acima de LIMITE_DA_MEDIA vezes a média do trecho) vão para uma segunda aba,
+// para não esconder os bons no meio deles. A média é de cada trecho (rota + data): assim um trecho
+// internacional não joga todos os voos dele para a aba dos caros só por custar mais que um nacional.
+const LIMITE_DA_MEDIA = 1.5;
+
 export function montarAbas(voos: Voo[]) {
-	const trechos = new Map<string, Voo[]>();
-	for (const voo of voos) {
-		const nome = voo.origem + "→" + voo.destino + " " + voo.data.slice(8, 10) + "/" + voo.data.slice(5, 7);
-		trechos.set(nome, [...(trechos.get(nome) ?? []), voo]);
+	const trecho = (voo: Voo) => voo.origem + voo.destino + voo.data;
+	const media = new Map<string, number>();
+	for (const [chave, lista] of Map.groupBy(voos, trecho)) {
+		media.set(chave, lista.reduce((soma, voo) => soma + voo.preco, 0) / lista.length);
 	}
+	const caro = (voo: Voo) => voo.preco > LIMITE_DA_MEDIA * media.get(trecho(voo))!;
 
-	const resumo = [];
-	const abasDosTrechos = [];
-	for (const [nome, lista] of trechos) {
-		const porPreco = lista.toSorted((a, b) => a.preco - b.preco);
-		const porDuracao = lista.toSorted((a, b) => a.duracao_min - b.duracao_min);
-		const porCustoBeneficio = lista.toSorted((a, b) => precoEquivalente(a) - precoEquivalente(b));
-		const barato = porPreco[0];
-		const rapido = porDuracao[0];
-		const melhor = porCustoBeneficio[0];
+	const checado = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" }).replace(",", "") + " BRT";
+	const linha = (voo: Voo) => {
+		const [ano, mes, dia] = voo.data.split("-");
+		// chegada vem como "12/12 20:00": no mesmo dia basta a hora, em outro dia a data fica
+		const chegada = voo.chegada.startsWith(dia + "/" + mes + " ") ? voo.chegada.slice(6) : voo.chegada;
+		const tipo = voo.escalas === 0 ? "direto" : voo.escalas === 1 ? "1 escala" : voo.escalas + " escalas";
+		return [dia + "/" + mes + "/" + ano, checado, tipo, voo.companhia, voo.saida + "-" + chegada, voo.origem, voo.destino, voo.preco, precoEquivalente(voo), horas(voo.duracao_min), "Google Flights", voo.link];
+	};
 
-		resumo.push([nome, lista.length, barato.preco, barato.companhia, barato.saida, melhor.preco, melhor.companhia, rapido.preco, horas(rapido.duracao_min)]);
-		abasDosTrechos.push({
-			nome,
-			colunas: ["companhia", "preco", "custo_beneficio", "escalas", "duracao", "saida", "chegada", "link"],
-			linhas: porPreco.map((voo) => [voo.companhia, voo.preco, precoEquivalente(voo), voo.escalas, horas(voo.duracao_min), voo.saida, voo.chegada, voo.link]),
-		});
-	}
-
+	const colunas = ["data_voo", "data_check", "tipo", "cia", "horario", "origem", "destino", "preco", "custo_beneficio", "duracao", "provider", "link"];
+	const ordenados = voos.toSorted((a, b) => a.data.localeCompare(b.data) || trecho(a).localeCompare(trecho(b)) || a.preco - b.preco);
 	return [
-		{
-			nome: "Resumo",
-			colunas: ["trecho", "voos", "mais_barato", "companhia", "saida", "melhor_custo_beneficio", "companhia_cb", "mais_rapido", "duracao_mais_rapido"],
-			linhas: resumo,
-		},
-		...abasDosTrechos,
+		{ nome: "Voos", colunas, linhas: ordenados.filter((voo) => !caro(voo)).map(linha) },
+		{ nome: "Acima de " + String(LIMITE_DA_MEDIA).replace(".", ",") + "x a média", colunas, linhas: ordenados.filter(caro).map(linha) },
 	];
 }
 
