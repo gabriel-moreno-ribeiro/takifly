@@ -10,9 +10,10 @@ stale_after: 2026-11-11T00:00:00Z
 
 # Estado verificado
 
-- Main em `51b6b8a`. O harness dos agentes de 08/11 está commitado na branch `gabriel-moreno-ribeiro/melhorar-harness-agentes-bot` (worktree `cuskeel`), ainda sem merge na main.
+- Main em `2175ee2` (merge do PR #2, harness dos agentes). A pasta principal está na main.
+- O WhatsApp sem commit da pasta principal foi guardado, sem mudanças, na branch local `whatsapp-em-andamento` (`2d38c63`). Para retomar: `git switch whatsapp-em-andamento` na pasta principal.
 - `npm test`: Tudo certo! em 2026-11-08 na worktree, sem `.env` (agora ele é opcional para os testes), com o grafo inteiro rodando em modelos falsos.
-- Serviços: `com.takifly.bot` e `com.takifly.watcher` rodando no launchd com o código da pasta principal; nada de 08/11 chegou neles.
+- Serviços: `com.takifly.bot` e `com.takifly.watcher` reiniciados em 08/11 às 15h com a main `2175ee2` (glm-5.3 + glm-5.3-flash); log com "Takifly ligado no Slack". Falta uma mensagem real no Slack.
 
 # Item ativo
 
@@ -20,8 +21,7 @@ Nenhum. H15, F26, H16, H17, H18 e H08 passaram pelo `verify-feature.ts` em 08/11
 
 A pessoa escolheu os modelos em 08/11: glm-5.3 no forte, glm-5.3-flash no barato (`brain/models.ts`). A prova ainda não mediu essa dupla.
 
-Próximo passo, que é da pessoa porque gasta crédito: `node quality/exam.ts` (284 casos, ~40 s cada; grava em `results/glm-5.3+glm-5.3-flash.jsonl`) e comparar com `results/glm-5.3.jsonl`. Se a nota de Fatos cair, o flash volta a ser só uma opção.
-- Antes de pôr no bot: commit, merge e `node takifly.ts restart`, quando a pessoa pedir.
+Próximo passo: investigar as 2 falhas da prova de 08/11 (`seguimento-mais-rapido`, `lugar-sao-jose`), ambas do modelo forte.
 
 Depois: `F13`, o bot só pesquisar com origem, destino e data de cada trecho (custa crédito: 7 cenários da prova).
 
@@ -37,8 +37,9 @@ Depois: `F13`, o bot só pesquisar com origem, destino e data de cada trecho (cu
 
 ## 2026-11-08
 
+- Interface no Slack, a pedido da pessoa (branch `gabriel-moreno-ribeiro/interface-slack`, sem commit): progresso passo a passo (F21 passou), links com nome e sem prévia, milhar com ponto, "Peguei" na fila, resposta para foto e áudio, erro sem jargão, emergência e aviso de preço para gente. Só código, sem prompt: não gasta crédito. Detalhes em `docs/AGENCIA.md`, "A interface no Slack". Mascote: `assets/taki-icone.png` e `assets/taki-emoji.png` gerados da foto da pessoa; o código usa `:taki:`. Antes do restart, a pessoa precisa subir o emoji no Slack. Quando a branch `whatsapp-em-andamento` voltar, o mapa `EMOJIS` de `sources/whatsapp.ts` precisa de `taki: "🐶"`. Falta: botões e boas-vindas (precisam de config no Slack).
 - Prova da dupla glm-5.3 + glm-5.3-flash: 278/284. Achou um defeito do grafo novo (replano sem plano derrubava o pedido), consertado em `6048585` com teste. Sobraram 2 falhas do modelo forte, a investigar. A pessoa escolheu pôr no ar mesmo com Fatos ~2 abaixo; PR #2 com merge.
-- Não reiniciei: a pasta principal tem o trabalho do WhatsApp sem commit (bot.ts, watcher.ts, sources/whatsapp.ts). O restart espera a pessoa decidir o que fazer com ele.
+- A pedido da pessoa: WhatsApp guardado na branch `whatsapp-em-andamento`, main nova na pasta principal, `npm test` Tudo certo! lá e restart.
 - H08: `hojeEmSaoPaulo` e `somarDias` foram para `rules/dates.ts`; `rules/` e `sources/` não importam mais `brain/`, e o bloco FRONTEIRAS do `quality/tests.ts` confere. `brain/tools.ts` reexporta as duas, então nenhum outro arquivo mudou.
 - Harness dos agentes, a pedido da pessoa: modelo forte e barato por papel (H15), "pronto" conferido por código (F26), especialistas voltando ao orquestrador (H16), agente de contexto (H17) e agente de memória (H18). Detalhes em `docs/AGENCIA.md`, seção "O harness dos agentes".
 - `npm test` agora roda o grafo de ponta a ponta com `ModeloFalso`: dá para testar mudança no grafo sem crédito.

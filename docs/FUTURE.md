@@ -122,10 +122,6 @@ Regra que não pode quebrar: **o modelo não responde isso de memória.** Númer
 - As piadinhas do Taki ("o Taki farejou...") são marcadas como confusas ou com cara de robô quando aparecem no meio da informação. É uma escolha de produto (regra 14 do redator): decidir se fica, e onde.
 - As famílias com escrita pior são as de várias cidades ou vários dias numa resposta só: `varios-destinos` (3,25), `limite`, `intervalo` e `hotel` (3,50). Resposta grande é onde o redator se perde.
 
-**7.3 Pedido lento tem que parecer trabalho, não travamento**
-- Na prova, os pedidos mais lentos (157 s num intervalo de 15 dias, 97 s, 74 s) não foram recusa do verificador: foram muitas chamadas de modelo em sequência (pesquisador → analista, várias rodadas de ferramenta).
-- Em 157 s a pessoa já desistiu e mandou outra mensagem, e o bot só ouve a nova depois de terminar a anterior. O mais barato não é acelerar o grafo: é mostrar no Slack o que está acontecendo, passo a passo. O `descreverChamada` (`brain/graph.ts`) já edita a mensagem "Pensando...", mas só sabe dizer "Pesquisando" e "Analisando".
-
 **7.4 Decidir se o limite de 7 dias é do pedido ou da chamada**
 - Para "qual o dia mais barato entre 8 e 22 de julho", o modelo divide em duas chamadas de 7 dias e faz 12 buscas, que é o limite do pedido. Se 7 dias é um limite de produto, ele precisa ser contado por pedido. Se não é, a description do `buscar_voos` pode dizer que dá para dividir.
 

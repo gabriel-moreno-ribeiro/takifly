@@ -131,5 +131,36 @@ export function arrumarParaSlack(texto: string) {
 		.replace(/\*\*(.+?)\*\*/g, "*$1*")
 		.replace(/^#{1,6}\s+(.+)$/gm, "*$1*")
 		.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, "<$2|$1>")
+		// link cru vira link com nome: o do Google tem 150 letras e ocupa 4 linhas no celular. Quem já está em <url|...> fica
+		.replace(/(?<![<|])https?:\/\/[^\s<>|)"'*]+/g, (url) => {
+			const limpo = url.replace(/[.,;:]+$/, "");
+			return `<${limpo}|${nomeDoLink(limpo)}>${url.slice(limpo.length)}`;
+		})
+		// "R$ 25650" vira "R$ 25.650". Não mexe em "R$ 3000,50" nem em número que já tem ponto
+		.replace(/R\$ ?(\d{4,})(?![\d.,]\d|\d)/g, (_, numero) => "R$ " + Number(numero).toLocaleString("pt-BR"))
 		.trim();
+}
+
+function nomeDoLink(url: string) {
+	if (/google\.[a-z.]+\/travel\/flights/.test(url)) return "ver no Google Voos";
+	if (/google\.[a-z.]+\/travel\/search/.test(url)) return "ver no Google Hotéis";
+	if (/docs\.google\.com\/spreadsheets/.test(url)) return "abrir a planilha";
+	try {
+		return new URL(url).hostname.replace(/^www\./, "");
+	} catch {
+		return "abrir o link";
+	}
+}
+
+// ---------- ERRO EM PALAVRAS DE GENTE ----------
+// o erro de verdade vai para o log; a pessoa só lê o que aconteceu e o que fazer.
+// "continuo de onde parei" é verdade: o responder() retoma pelo checkpoint quando o grafo parou no meio
+export function explicarErro(erro: unknown) {
+	const mensagem = String((erro as Error)?.message ?? erro);
+	const motivo = /fetch failed|ECONN|socket|terminated|timed? ?out|aborted|429|rate ?limit|overloaded|\b5\d\d\b|unavailable|gateway/i.test(mensagem)
+		? "o serviço que eu uso para pensar não respondeu"
+		: /limite de \d+ buscas/i.test(mensagem)
+			? "o pedido tinha buscas demais de uma vez"
+			: "me enrolei aqui dentro";
+	return `:warning: Não terminei esse pedido: ${motivo}. Manda de novo daqui a pouco que eu continuo de onde parei.`;
 }

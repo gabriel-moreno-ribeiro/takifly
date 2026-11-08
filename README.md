@@ -25,6 +25,7 @@ Uma pasta é um trabalho. Para mudar como o bot pensa, abra `brain/`. Se uma bus
 | `rules/` | O que o código sabe sozinho, sem IA: aeroportos do mundo, visto, vacina, passaporte. |
 | `storage/` | O que precisa durar depois de reiniciar: monitoramentos, preferências e documentos. |
 | `quality/` | O que testa e mede: os testes, a prova, os 10 mil cenários, o juiz de escrita e o painel. |
+| `assets/` | O Taki: `taki-icone.png` (ícone do app no Slack, 1024 px) e `taki-emoji.png` (emoji `:taki:`, 128 px). |
 | `docs/` | O que já foi feito (`AGENCIA.md`), o que vem depois (`FUTURE.md`), notas e o manual. |
 | `data/` | Os dois bancos (`dados.sqlite`, `memoria.sqlite`) e a trava do vigia. **Não apague.** |
 | `logs/`, `results/` | Gerados enquanto o bot e a prova rodam. Podem ser apagados. |

@@ -46,7 +46,7 @@ async function avisarNoSlack(conversa: string, texto: string) {
 	const resposta = await fetch("https://slack.com/api/chat.postMessage", {
 		method: "POST",
 		headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`, "Content-Type": "application/json; charset=utf-8" },
-		body: JSON.stringify({ channel: conversa, text: texto }),
+		body: JSON.stringify({ channel: conversa, text: texto, unfurl_links: false, unfurl_media: false }),    // sem o cartão de prévia do Google embaixo do link
 	});
 	const corpo = await resposta.json();
 	if (!corpo.ok) throw new Error(`o Slack não aceitou o aviso: ${corpo.error}`);

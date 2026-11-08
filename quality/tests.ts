@@ -10,10 +10,10 @@ import { AIMessage, AIMessageChunk, type BaseMessage, HumanMessage, ToolMessage 
 
 import { AGENTES, planoValido } from "../brain/agents.ts";
 import { atualizarMonitoramento, buscasDoDia, criarMonitoramento, guardarPreferencia, listarHistorico, listarMonitoramentos, listarPreferencias, somarBuscasDoDia } from "../storage/database.ts";
-import { checarMonitoramentos } from "../brain/price-watch.ts";
+import { checarMonitoramentos, paraGente } from "../brain/price-watch.ts";
 import { conferirLugar, dataFoiDita, entenderClasse, entenderData, limparArgumentos, REGISTRO, servicos, todasAsFerramentas, type Caderno } from "../brain/tools.ts";
 import { montarAbas, servicos as planilhas } from "../sources/spreadsheet.ts";
-import { arrumarParaSlack, verificarResposta } from "../brain/checker.ts";
+import { arrumarParaSlack, explicarErro, verificarResposta } from "../brain/checker.ts";
 import { buscarVoos, lerPagina, montarTfs, nomeDeCompanhia, precoEquivalente, type Voo } from "../sources/flights.ts";
 import { buscarHospedagem, conferirPedido as conferirPedidoDeHospedagem, descreverHospedagem, lerPagina as lerPaginaDeHotel, montarBusca, notaConfiavel, precoEquivalente as precoEquivalenteDaHospedagem, resumirHospedagens, textoDeFora } from "../sources/hotels.ts";
 import { conferirViagem, type Viagem } from "../rules/rules.ts";
@@ -27,7 +27,7 @@ import { lerCsv } from "../rules/update-airports-data.ts";
 // O grafo abre o checkpoint ao ser carregado, por isso ele vem depois do MEMORIA, por await import.
 process.env.DADOS = ":memory:";
 process.env.MEMORIA = ":memory:";
-const { comIdNovo, cortarHistorico, fatosParaGuardar, grafo, historicoLimpo, modelos, noContexto, noFerramentas, noLembrar, noSituacao, regrasDaViagem, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
+const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, listarVoosParaPessoa, historicoLimpo, modelos, noContexto, noFerramentas, noLembrar, noSituacao, regrasDaViagem, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
 
 // ---------- HISTÓRICO ----------
 const pergunta = new HumanMessage("oi");
@@ -394,8 +394,10 @@ assert.equal(avisos.length, 0);
 precoDoGoogle = 2400;
 await checagem();
 assert.equal(avisos.length, 1);
-assert.match(avisos[0], /R\$ 2400.*alvo é R\$ 2500/);
-assert.match(avisos[0], /https:\/\/voos\/GRU/);
+assert.match(avisos[0], /\*R\$ 2\.400\*.*alvo é R\$ 2\.500/);
+assert.match(avisos[0], /<https:\/\/voos\/GRU\|Comprar>/);               // link com nome, e não as 150 letras do Google
+assert.match(avisos[0], /cancela o monitoramento \d+/);                     // o aviso diz como parar
+assert.match(avisos[0], /, 12\/12|, \d\d\/\d\d,/);                            // data dd/mm, e não 2026-12-12
 
 // o mesmo preço não repete o aviso, mas um preço ainda menor avisa
 await checagem();
@@ -416,7 +418,8 @@ avisos = [];
 precoDoGoogle = "erro";
 for (let i = 0; i < 6; i++) await checagem();
 assert.equal(avisos.length, 1);
-assert.match(avisos[0], /Não estou conseguindo checar/);
+assert.match(avisos[0], /não consigo checar o preço/);
+assert.doesNotMatch(avisos[0], /\(.*erro.*\)|fetch|Google respondeu/i);     // o erro técnico fica só no log
 assert.equal(listarMonitoramentos("rotina").length, 1);
 
 // sem voos não é erro nem aviso
@@ -442,7 +445,7 @@ assert.equal(avisos.length, 0);
 precoDoGoogle = 2900;
 await checagem();
 assert.equal(avisos.length, 1);
-assert.match(avisos[0], /era R\$ 3000/);
+assert.match(avisos[0], /menor que eu tinha visto era R\$ 3\.000/);
 
 // conexão que caiu: o nó buscar tenta de novo sozinho, e a queda não conta como falha do monitoramento
 atualizarMonitoramento(idDaRotina, { ativo: 0 });
@@ -624,6 +627,34 @@ assert.equal(arrumarParaSlack("<!channel> oi <@U123>"), "oi");
 assert.equal(arrumarParaSlack("Air\u202FEuropa\u00A0por R$\u202F10"), "Air Europa por R$ 10");
 assert.equal(arrumarParaSlack("[Comprar](https://voos/1)"), "<https://voos/1|Comprar>");
 assert.equal(recusa(arrumarParaSlack("[Comprar](https://voos/1)")), false);    // o link continua conferido depois de arrumado
+
+// ---------- A INTERFACE NO SLACK ----------
+// link cru ganha nome; link que já tem nome não muda; o verificador continua conferindo a URL de dentro
+assert.equal(arrumarParaSlack("Comprar: https://www.google.com/travel/flights/search?tfs=abc."), "Comprar: <https://www.google.com/travel/flights/search?tfs=abc|ver no Google Voos>.");
+assert.equal(arrumarParaSlack("<https://voos/1|Comprar>"), "<https://voos/1|Comprar>");
+assert.equal(recusa(arrumarParaSlack("Comprar: https://voos/1")), false);
+assert.equal(recusa(arrumarParaSlack("Comprar: https://golpe.exemplo/pagar")), true);    // link inventado continua recusado, com ou sem nome
+// milhar com ponto, sem estragar centavos nem número que já tem ponto; o verificador lê "55.520" como 55520
+assert.equal(arrumarParaSlack("Total *R$ 55520*, R$ 3000,50, R$ 3.250 e R$ 980."), "Total *R$ 55.520*, R$ 3000,50, R$ 3.250 e R$ 980.");
+assert.deepEqual(verificarResposta(arrumarParaSlack("Total R$ 55520"), "Resultado: 55520", ""), []);
+// erro em palavras de gente: nada de "undefined", "fetch" ou nome de peça de dentro
+assert.match(explicarErro(new Error("fetch failed")), /serviço que eu uso para pensar não respondeu.*continuo de onde parei/);
+assert.match(explicarErro(new Error("Cannot read properties of undefined (reading 'agentes')")), /me enrolei aqui dentro/);
+assert.doesNotMatch(explicarErro(new Error("o orquestrador não devolveu o plano")), /orquestrador|plano|undefined/);
+// o aviso de progresso: data dd/mm só quando chega em AAAA-MM-DD, hotel e memória com frase própria
+assert.equal(descreverChamada({ name: "buscar_voos", args: { origem: "GRU", destino: "LIS", data: "2026-12-10", ate: "14/12" } }), ":mag: Procurando voos de GRU para LIS de 10/12 a 14/12...");
+assert.equal(descreverChamada({ name: "buscar_hoteis", args: { cidade: "Lisboa" } }), ":hotel: Procurando hotel em Lisboa...");
+assert.equal(descreverChamada({ name: "guardar_preferencia", args: { texto: "mora em Recife" } }), ":memo: Anotando o que você me contou...");
+assert.equal(descreverPasso("orquestrador", { plano: ["pesquisador", "analista"] }), ":mag: Indo atrás dos voos...");
+assert.equal(descreverPasso("verificar", { correcao: "O verificador recusou" }), ":repeat: Um número não bateu com a pesquisa. Reescrevendo...");
+assert.equal(descreverPasso("verificar", { messages: [] }), "");
+assert.equal(descreverPasso("preparar", {}), "");
+// a lista da emergência: para gente, sem custo-benefício nem nome de ferramenta, do mais barato ao mais caro
+const listaDeEmergencia = listarVoosParaPessoa([{ ...voo, preco: 3400, escalas: 0, link: "https://voos/2" }, { ...voo, preco: 2850, escalas: 2, link: "https://voos/1" }]);
+assert.match(listaDeEmergencia, /^\*\w{3} → \w{3} em \d\d\/\d\d\*\nR\$ 2\.850 · .* · 2 escalas ·[\s\S]*R\$ 3\.400 · .* · direto ·[\s\S]*<https:\/\/voos\/1\|Ver no Google Voos>$/);
+assert.doesNotMatch(listaDeEmergencia, /custo|filtrar_voos|escala\(s\)/);
+// o monitoramento como a pessoa lê: dd/mm, plural certo, classe com acento
+assert.equal(paraGente({ origens: "GRU,CGH", destinos: "LIS", data: "2026-12-12", data_volta: "2026-12-20", adultos: 2, criancas: 0, classe: "economica" }), "GRU/CGH → LIS, 12/12 a 20/12, 2 passageiros, econômica");
 
 // ---------- O NOME QUE VEM DE FORA ----------
 // é o único texto livre que a página do Google manda para dentro; instrução plantada ali chegaria ao
@@ -1139,7 +1170,7 @@ rodada = await rodarComFalsos("falso-busca", "voos de GRU para REC em 12/12",
 	[planoFalso("pesquisador"), new AIMessage("Achei voos de GRU para Recife. Quer só os diretos?")],
 	[pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "12/12" }), new AIMessage("*Pronto!*")]);    // "Pronto!" também vale, sem refazer o plano
 assert.equal(rodada.estado.buscas.length, 1);
-assert.match(rodada.estado.messages.at(-1).text, /Planilha: https:\/\/planilha\.falsa\/1/);
+assert.match(rodada.estado.messages.at(-1).text, /:bar_chart: Planilha: <https:\/\/planilha\.falsa\/1\|abrir os \d+ voos na planilha>/);
 assert.match(textoDa(rodada.forte.cartas[1]), /GRU→REC/);    // o redator viu o resultado da busca
 
 // "pronto" sem ter feito a tarefa não tira o especialista do plano: o código manda ele de volta, com um bilhete
