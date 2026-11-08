@@ -29,6 +29,7 @@ Depois: `F13`, o bot só pesquisar com origem, destino e data de cada trecho (cu
 
 | Data | Commit | Modelo | Cenários | Fatos | Escrita | Piores famílias |
 |---|---|---|---|---|---|---|
+| 2026-11-08 | 63a4965 | glm-5.3 + glm-5.3-flash | 284 | 278/284; com o conserto 6048585 os 6 que falharam rodaram de novo e 4 passaram (~280/284) | | seguimento-mais-rapido (preço atribuído à Azul), lugar-sao-jose (não perguntou qual São José). Antes 282/284 com o grafo antigo. 26 s por caso, contra 37 s |
 | 2026-11-03 | sem commit | glm-5.3 | 10 mil gerados | 9767/10000 | 4,26/5 | saudacao 203/250, hotel 390/450, classe 369/400 |
 | 2026-10-30 | f52b5ee | glm-5.3, gemma4:31b, gpt-oss:20b, nemotron-3-nano:30b | 284 | ver `node quality/scoreboard.ts` (hoje quebra, item H09) | | |
 
@@ -36,6 +37,8 @@ Depois: `F13`, o bot só pesquisar com origem, destino e data de cada trecho (cu
 
 ## 2026-11-08
 
+- Prova da dupla glm-5.3 + glm-5.3-flash: 278/284. Achou um defeito do grafo novo (replano sem plano derrubava o pedido), consertado em `6048585` com teste. Sobraram 2 falhas do modelo forte, a investigar. A pessoa escolheu pôr no ar mesmo com Fatos ~2 abaixo; PR #2 com merge.
+- Não reiniciei: a pasta principal tem o trabalho do WhatsApp sem commit (bot.ts, watcher.ts, sources/whatsapp.ts). O restart espera a pessoa decidir o que fazer com ele.
 - H08: `hojeEmSaoPaulo` e `somarDias` foram para `rules/dates.ts`; `rules/` e `sources/` não importam mais `brain/`, e o bloco FRONTEIRAS do `quality/tests.ts` confere. `brain/tools.ts` reexporta as duas, então nenhum outro arquivo mudou.
 - Harness dos agentes, a pedido da pessoa: modelo forte e barato por papel (H15), "pronto" conferido por código (F26), especialistas voltando ao orquestrador (H16), agente de contexto (H17) e agente de memória (H18). Detalhes em `docs/AGENCIA.md`, seção "O harness dos agentes".
 - `npm test` agora roda o grafo de ponta a ponta com `ModeloFalso`: dá para testar mudança no grafo sem crédito.
