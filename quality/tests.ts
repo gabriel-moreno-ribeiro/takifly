@@ -1188,6 +1188,14 @@ rodada = await rodarComFalsos("falso-limite-de-replanos", "me ajuda",
 assert.equal(rodada.estado.replanos, 2);
 assert.equal(rodada.estado.feitos.length, 3);
 
+// ao refazer o plano, o modelo responde em texto, sem chamar definir_plano: o pedido não quebra, o redator responde
+// com o que tem (na prova de 08/11 isso derrubava o bot com "reading 'agentes'")
+rodada = await rodarComFalsos("falso-replano-sem-plano", "me ajuda",
+	[planoFalso("memoria"), new AIMessage("acho que ninguém"), new AIMessage("Me conta o que você precisa: um voo, um hotel?")],
+	[new AIMessage("faltou: não sei o que guardar")]);
+assert.equal(rodada.estado.replanos, 1);
+assert.equal(rodada.estado.messages.at(-1).text, "Me conta o que você precisa: um voo, um hotel?");
+
 // o agente de contexto: frase com valor (em qualquer moeda), horário, duração, link ou documento sai do resumo; o resto fica
 assert.equal(
 	resumoLimpo("A pessoa mora em Recife e quer ir a Lisboa em 12/12. O voo da TAP custou R$ 3000. Sai às 10:30.\nPrefere voo direto. O voo dura 11h40. Viu em https://x.com"),
@@ -1289,6 +1297,15 @@ for (const item of lista.features) {
 }
 const ativos = lista.features.filter((item) => item.state === "active").map((item) => item.id);
 assert.ok(ativos.length <= 1, `só um item pode estar active, e há ${ativos.length}: ${ativos.join(", ")}. Termine ou marque blocked antes de ativar outro`);
+
+// ---------- FRONTEIRAS ----------
+// rules/, sources/ e storage/ são peças soltas: o cérebro usa elas, elas não usam o cérebro
+for (const pasta of ["rules", "sources", "storage"]) {
+	for (const nome of readdirSync(`${RAIZ}/${pasta}`).filter((nome) => nome.endsWith(".ts"))) {
+		const texto = readFileSync(`${RAIZ}/${pasta}/${nome}`, "utf8");
+		assert.ok(!/from\s+["']\.\.\/brain\//.test(texto), `${pasta}/${nome} importa de brain/: mova o que ele precisa para rules/, sources/ ou storage/ (veja rules/dates.ts)`);
+	}
+}
 
 // ---------- MAPA DOS DOCS ----------
 // o AGENTS.md é o mapa: todo doc tem cabeçalho OKF, aparece no mapa, e tudo o que o mapa cita existe

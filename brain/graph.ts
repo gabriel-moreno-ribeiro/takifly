@@ -292,7 +292,18 @@ async function noOrquestrador(estado: typeof Estado.State) {
 
 	const carta = [new SystemMessage(comResumo(instrucoesDoOrquestrador(estado.voos.length > 0, estado.feitos), estado)), ...historicoLimpo(estado.messages)];
 	const orquestrador = modelos.forte.withStructuredOutput(Plano, { name: "definir_plano", method: "functionCalling" });
-	const resposta = await orquestrador.invoke(carta);
+	// ao refazer o plano, o glm-5.3 às vezes responde em texto, sem o plano (prova de 08/11, 2 casos): vem vazio
+	// ou com o erro "No tool calls found". Em vez de derrubar o pedido, segue para o conferir com o que já tem,
+	// como no limite de replanos. No começo do pedido não há com o que responder: o erro sobe e o retryPolicy tenta de novo
+	const resposta = await orquestrador.invoke(carta).catch((erro) => {
+		if (!ultimo) throw erro;
+		return undefined;
+	});
+	if (!resposta && ultimo) {
+		console.log(`[orquestrador] não devolveu plano depois de "${ultimo}": vai responder com o que tem`);
+		return { plano: [], replanos: estado.replanos + 1 };
+	}
+	if (!resposta) throw new Error("o orquestrador não devolveu o plano");
 	// o zod já garantiu o formato; o código tira nome repetido e põe na ordem certa, não chama de novo quem já
 	// resolveu a sua parte e não deixa ninguém trabalhar uma terceira vez
 	const vezes = (nome: string) => estado.feitos.filter((feito) => feito.startsWith(nome + ":")).length;
