@@ -355,8 +355,8 @@
 			"area": "brain",
 			"behavior": "Pedido lento mostra no Slack cada passo (especialista, busca, análise), não só 'Pesquisando'.",
 			"verification": "grep -q 'export function descreverChamada' brain/graph.ts && node quality/tests.ts",
-			"state": "not_started",
-			"evidence": "",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 2175ee2 com mudanças sem commit: Tudo certo!",
 			"notes": "FUTURE 7.3"
 		},
 		{

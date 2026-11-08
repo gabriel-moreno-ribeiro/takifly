@@ -210,6 +210,21 @@ Limite da Ollama Cloud que pesa aqui: ela não aplica JSON schema e ignora `tool
 formulário" é oferecer uma ferramenta só e pedir que o modelo a chame (`method: "functionCalling"`, com
 `retryPolicy`). Com o glm-5.3 isso acertou 4 de 4 em 03/11; com o glm-5.3-flash a prova ainda vai dizer.
 
+## A interface no Slack
+
+O que a pessoa vê e não passa pelo modelo é código, e por isso muda de graça (só `npm test`):
+
+- **Progresso passo a passo** (F21): `descreverPasso` e `descreverChamada` (`brain/graph.ts`) editam o aviso "O Taki está farejando..." a cada nó e a cada ferramenta: "Procurando voos de GRU para LIS em 12/12...", "Escrevendo a resposta...", "Conferindo cada preço e horário...", "Um número não bateu com a pesquisa. Reescrevendo...".
+- **Links com nome e sem cartão de prévia**: `arrumarParaSlack` (`brain/checker.ts`) troca o link cru por `<url|ver no Google Voos>` e põe ponto no milhar (R$ 55.520) antes do verificador, que continua conferindo a URL e o valor. `bot.ts` e `watcher.ts` mandam com `unfurl_links: false`.
+- **Fila e arquivos** (`bot.ts`): mensagem que chega com o bot ocupado ganha "Peguei. Termino o pedido anterior e já vejo esse."; foto, áudio ou arquivo sem texto ganham uma resposta, em vez de silêncio.
+- **Erro em palavras de gente**: `explicarErro` (`brain/checker.ts`) diz o que aconteceu e o que fazer; o erro técnico fica no `logs/bot.log`. A planilha que falha diz que tenta de novo na próxima mensagem.
+- **Emergência**: `listarVoosParaPessoa` (`brain/graph.ts`) manda até 5 voos por trecho, com dd/mm e sem o número do custo-benefício.
+- **Aviso de preço** (`brain/price-watch.ts`, `paraGente`): data dd/mm, links "Comprar a ida" e "Comprar a volta", quanto estava quando a pessoa pediu e como parar ("cancela o monitoramento 3"). A falha não mostra mais o erro técnico.
+
+- **O mascote**: `assets/taki-icone.png` é o ícone do app (api.slack.com → Basic Information → Display Information) e `assets/taki-emoji.png` é o emoji `:taki:` do workspace, usado no aviso de progresso, no "Peguei" e no aviso de preço. Sem o emoji enviado ao Slack, aparece o texto `:taki:` cru.
+
+Precisam de configuração em api.slack.com e ainda não foram feitos: botões de próximo passo (Interactivity) e boas-vindas no primeiro contato (eventos `app_home_opened` e `member_joined_channel`).
+
 ## De onde vem cada dado real
 
 Nada aqui é inventado. Cada fonte tem um jeito de quebrar, e é isso que esta tabela serve para lembrar:

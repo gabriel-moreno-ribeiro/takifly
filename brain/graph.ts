@@ -37,13 +37,14 @@ import { ChatOpenAI } from "@langchain/openai";
 
 import { AGENTES, INSTRUCOES_DO_RESUMO, instrucoesDaMemoria, instrucoesDoOrquestrador, instrucoesDoRedator, Lembrete, type NomeDoAgente, Plano, planoValido } from "./agents.ts";
 import { apagarPreferencia, type Dossie, guardarPreferencia, lerDossie, listarMonitoramentos, listarPreferencias } from "../storage/database.ts";
-import { type Caderno, conferirNoRegistro, descreverMonitoramento, descreverVoo, LIMITE_DE_PREFERENCIAS, limparArgumentos, resumirVoos, servicos } from "./tools.ts";
+import { type Caderno, conferirNoRegistro, descreverMonitoramento, descreverVoo, LIMITE_DE_PREFERENCIAS, limparArgumentos, servicos } from "./tools.ts";
 import { semAcento } from "../rules/airports.ts";
 import { conferirViagem, paisDoAeroporto, type Trecho, type Viagem } from "../rules/rules.ts";
 import { anotar, rastrear } from "./tracing.ts";
 import { nomesDosModelos, rotuloDosModelos } from "./models.ts";
 import { arrumarParaSlack, escreveuChamada, prometeuSemFazer, verificarResposta } from "./checker.ts";
 import { REGRA_DO_CUSTO_BENEFICIO, type Voo } from "../sources/flights.ts";
+import { horas } from "../sources/spreadsheet.ts";
 
 // ---------- CHAVES ----------
 // sem .env (worktree nova, CI), as chaves vêm do ambiente: os testes não precisam delas
@@ -629,9 +630,24 @@ function noEmergencia(estado: typeof Estado.State, config: LangGraphRunnableConf
 	console.log("[emergencia] o redator não acertou a resposta");
 	anotar(conversaDe(config), "emergencia", false, "o redator errou todas as tentativas");
 	const texto = estado.voos.length > 0
-		? `Não consegui escrever a resposta com segurança, então seguem os dados direto da pesquisa:\n\n${resumirVoos(estado.voos)}`
-		: "Não consegui responder com segurança. Pode repetir o pedido de outro jeito?";
+		? `Não consegui escrever a resposta direito, então vai o essencial, direto da pesquisa:\n\n${listarVoosParaPessoa(estado.voos)}`
+		: RESPOSTA_QUE_NAO_SAIU;
 	return { messages: [new AIMessage(texto)], correcao: "" };
+}
+
+const RESPOSTA_QUE_NAO_SAIU = "Me enrolei e não consegui montar a resposta. Pode repetir com outras palavras?";
+
+// a lista da emergência é para gente: o resumirVoos é para o modelo e traz custo-benefício (parece preço e não é)
+// e nome de ferramenta. Tudo aqui sai de estado.voos, que só tem o que as ferramentas devolveram
+export function listarVoosParaPessoa(voos: Voo[]) {
+	const ddmm = (data: string) => `${data.slice(8, 10)}/${data.slice(5, 7)}`;
+	const escalas = (n: number) => (n === 0 ? "direto" : n === 1 ? "1 escala" : `${n} escalas`);
+	return [...Map.groupBy(voos, (voo) => `${voo.origem} → ${voo.destino} em ${ddmm(voo.data)}`)].map(([trecho, lista]) => {
+		const ordem = lista.toSorted((a, b) => a.preco - b.preco);
+		const linhas = ordem.slice(0, 5).map((voo) => `R$ ${voo.preco.toLocaleString("pt-BR")} · ${voo.companhia} · ${escalas(voo.escalas)} · ${horas(voo.duracao_min)} · sai ${voo.saida}`);
+		const mais = lista.length > 5 ? `\n(e mais ${lista.length - 5} voos na planilha)` : "";
+		return `*${trecho}*\n${linhas.join("\n")}${mais}\n<${ordem[0].link}|Ver no Google Voos>`;
+	}).join("\n\n");
 }
 
 // ---------- NÓ: PLANILHA ----------
@@ -642,10 +658,12 @@ async function noPlanilha(estado: typeof Estado.State) {
 	const rotas = [...new Set(estado.novos.map((voo) => `${voo.origem}→${voo.destino}`))].join(", ");
 	try {
 		const link = await servicos.criarPlanilha("Takifly " + rotas, estado.novos);
-		return { messages: [new AIMessage({ id: ultima.id, content: `${ultima.text}\n\n:bar_chart: Planilha: ${link}` })], novos: [] };
+		// o começo ":bar_chart: Planilha:" fica: o quality/style-judge.ts reconhece esta linha por ele
+		return { messages: [new AIMessage({ id: ultima.id, content: `${ultima.text}\n\n:bar_chart: Planilha: <${link}|abrir os ${estado.novos.length} voos na planilha>` })], novos: [] };
 	} catch (erro: any) {
-		// os voos continuam em "novos": a próxima mensagem tenta criar a planilha de novo
-		return { messages: [new AIMessage({ id: ultima.id, content: `${ultima.text}\n\nNão consegui criar a planilha: ${erro.message}` })] };
+		// os voos continuam em "novos": a próxima mensagem tenta criar a planilha de novo. O motivo técnico fica no log
+		console.log(`[planilha] não criei: ${erro.message}`);
+		return { messages: [new AIMessage({ id: ultima.id, content: `${ultima.text}\n\nNão consegui criar a planilha agora. Na sua próxima mensagem eu tento de novo.` })] };
 	}
 }
 
@@ -720,11 +738,29 @@ export const grafo = new StateGraph(Estado)
 // ---------- RESPONDER ----------
 type Avisar = (progresso: string) => Promise<void> | void;
 
-// o que aparece no Slack enquanto o grafo trabalha
-function descreverChamada(chamada: { name: string; args: Record<string, any> }) {
-	if (chamada.name === "buscar_voos") return `:mag: Pesquisando ${chamada.args.origem}→${chamada.args.destino} ${chamada.args.ate ? `de ${chamada.args.data} a ${chamada.args.ate}` : `em ${chamada.args.data}`}...`;
-	if (chamada.name === "criar_monitoramento") return `:eyes: Criando o monitoramento de ${chamada.args.origem}→${chamada.args.destino}...`;
-	return ":gear: Analisando os voos...";
+// ---------- O QUE APARECE NO SLACK ENQUANTO O GRAFO TRABALHA ----------
+// a data chega como a pessoa escreveu ("12/12", "próxima sexta"); só a data em AAAA-MM-DD vira dd/mm
+const paraPessoa = (data: unknown) => (typeof data === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data) ? `${data.slice(8, 10)}/${data.slice(5, 7)}` : data);
+
+export function descreverChamada(chamada: { name: string; args: Record<string, any> }) {
+	const { origem, destino, data, ate, cidade } = chamada.args;
+	if (chamada.name === "buscar_voos") return `:mag: Procurando voos de ${origem} para ${destino} ${ate ? `de ${paraPessoa(data)} a ${paraPessoa(ate)}` : `em ${paraPessoa(data)}`}...`;
+	if (chamada.name === "buscar_hoteis") return `:hotel: Procurando hotel em ${cidade}...`;
+	if (chamada.name === "criar_monitoramento") return `:eyes: Ligando o monitoramento de preço de ${origem} para ${destino}...`;
+	if (chamada.name.includes("monitoramento")) return ":eyes: Olhando seus monitoramentos...";
+	if (chamada.name.startsWith("guardar_")) return ":memo: Anotando o que você me contou...";
+	if (chamada.name.includes("preferencia")) return ":memo: Olhando o que eu tenho anotado...";
+	return ":bar_chart: Comparando os voos...";
+}
+
+// o stream avisa quando um nó TERMINA: a frase diz o que começa depois dele. Nó sem frase não muda o aviso
+const DEPOIS_DO_PLANO: Record<string, string> = { pesquisador: ":mag: Indo atrás dos voos...", analista: ":bar_chart: Comparando os voos...", monitor: ":eyes: Cuidando do monitoramento...", memoria: ":memo: Anotando..." };
+export function descreverPasso(no: string, resultado: any) {
+	if (no === "orquestrador") return DEPOIS_DO_PLANO[resultado?.plano?.[0]] ?? "";
+	if (no === "conferir" || no === "situacao") return ":pencil2: Escrevendo a resposta...";
+	if (no === "redator") return ":mag_right: Conferindo cada preço e horário...";
+	if (no === "verificar" && resultado?.correcao) return ":repeat: Um número não bateu com a pesquisa. Reescrevendo...";
+	return "";
 }
 
 // stream roda o grafo igual ao invoke, mas entrega o resultado de cada nó assim que ele termina.
@@ -732,8 +768,10 @@ function descreverChamada(chamada: { name: string; args: Record<string, any> }) 
 async function rodar(entrada: { messages: BaseMessage[] } | null, config: { configurable: { thread_id: string } }, avisar: Avisar) {
 	const callbacks = rastrear(config.configurable.thread_id, rotuloDosModelos());
 	for await (const passo of await grafo.stream(entrada, { ...config, streamMode: "updates", recursionLimit: 60, callbacks })) {
-		// cada passo traz o resultado de um nó; se um especialista pediu ferramentas, conta o que está acontecendo
-		for (const resultado of Object.values(passo) as { messages?: AIMessage[] }[]) {
+		// cada passo traz o resultado de um nó: conta o que vem depois dele, e o que cada ferramenta pedida vai fazer
+		for (const [no, resultado] of Object.entries(passo) as [string, any][]) {
+			const frase = descreverPasso(no, resultado);
+			if (frase) await avisar(frase);
 			for (const chamada of resultado?.messages?.[0]?.tool_calls ?? []) await avisar(descreverChamada(chamada));
 		}
 	}
@@ -752,7 +790,7 @@ export async function responder(conversa: string, texto: string, avisar: Avisar 
 	if (anterior.next.length > 0) respostaAtrasada = (await rodar(null, config, avisar)) + "\n\n";
 
 	const resposta = await rodar({ messages: [new HumanMessage(texto)] }, config, avisar);
-	return respostaAtrasada + (resposta || "Não consegui escrever uma resposta. Pode repetir o pedido?");
+	return respostaAtrasada + (resposta || RESPOSTA_QUE_NAO_SAIU);
 }
 
 // ---------- USO PELO TERMINAL ----------

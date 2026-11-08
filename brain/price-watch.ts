@@ -106,12 +106,23 @@ function avisarDe(config?: LangGraphRunnableConfig): Avisar {
 	};
 }
 
+// ---------- TEXTO PARA A PESSOA ----------
+// o descreverMonitoramento (tools.ts) é o texto que o modelo lê: muda-lo seria mudar o prompt. Este é o que a pessoa lê
+const CLASSE: Record<string, string> = { economica: "econômica", premium: "premium", executiva: "executiva", primeira: "primeira classe" };
+const reais = (valor: number) => `R$ ${valor.toLocaleString("pt-BR")}`;
+const ddmm = (data: string) => `${data.slice(8, 10)}/${data.slice(5, 7)}`;
+export function paraGente(m: Pick<Monitoramento, "origens" | "destinos" | "data" | "data_volta" | "adultos" | "criancas" | "classe">) {
+	const quando = m.data_volta ? `${ddmm(m.data)} a ${ddmm(m.data_volta)}` : ddmm(m.data);
+	const gente = m.adultos + m.criancas;
+	return `${m.origens.replaceAll(",", "/")} → ${m.destinos.replaceAll(",", "/")}, ${quando}, ${gente} ${gente === 1 ? "passageiro" : "passageiros"}, ${CLASSE[m.classe] ?? m.classe}`;
+}
+
 // ---------- NÓ: ENCERRAR ----------
 // a viagem já passou: não há mais o que monitorar.
 // Avisa primeiro e só depois desliga: se o Slack falhar, o monitoramento continua ativo e a próxima volta tenta de novo.
 async function noEncerrar(estado: typeof Estado.State, config: LangGraphRunnableConfig) {
 	const m = estado.monitoramento!;
-	await avisarDe(config)(m.conversa, `:dog: Parei de monitorar ${descreverMonitoramento(m)}: a data da viagem já passou. O Taki largou esse osso.`);
+	await avisarDe(config)(m.conversa, `A viagem ${paraGente(m)} já passou, então parei de acompanhar esse preço. Se quiser outra data, é só me pedir.`);
 	atualizarMonitoramento(m.id, { ativo: 0 });
 	return { resultado: "viagem-passou" };
 }
@@ -182,7 +193,8 @@ async function noFalhou(estado: typeof Estado.State, config: LangGraphRunnableCo
 	const falhas = m.falhas + 1;
 	console.log(`[monitor] #${m.id} falhou (${falhas}): ${estado.erro}`);
 	if (falhas === FALHAS_ATE_AVISAR) {
-		await avisarDe(config)(m.conversa, `:warning: Não estou conseguindo checar ${descreverMonitoramento(m)} há cerca de um dia (${estado.erro}). O Taki perdeu o faro, mas continua tentando.`);
+		// o motivo técnico já saiu no console.log acima; a pessoa só precisa saber que o monitoramento segue vivo
+		await avisarDe(config)(m.conversa, `:warning: Faz cerca de um dia que não consigo checar o preço de ${paraGente(m)}. Continuo tentando de 2 em 2 horas e aviso se baixar.`);
 	}
 	atualizarMonitoramento(m.id, { falhas, checado_em: estado.agora });
 	return { resultado: "falhou" };
@@ -220,9 +232,16 @@ async function noAvisar(estado: typeof Estado.State, config: LangGraphRunnableCo
 	const preco = estado.preco!;
 
 	if (m.avisado_preco === null || preco.total < m.avisado_preco) {
-		const motivo = m.preco_alvo !== null ? `seu alvo é R$ ${m.preco_alvo}` : `era R$ ${m.menor_preco}`;
-		const links = [preco.ida.link, preco.volta?.link].filter(Boolean).join("\n");
-		await avisarDe(config)(m.conversa, `:dog: *Au au! Preço bom!* ${descreverMonitoramento(m)}: *R$ ${preco.total}* (${motivo}).\nComprar:\n${links}`);
+		const motivo = m.preco_alvo !== null ? `seu alvo é ${reais(m.preco_alvo)}` : `o menor que eu tinha visto era ${reais(m.menor_preco!)}`;
+		// o primeiro preço do histórico é o de quando a pessoa pediu: dá para dizer quanto caiu desde então
+		const primeiro = listarHistorico(m.id)[0];
+		const desdeOComeco = primeiro && primeiro.total > preco.total ? ` Quando você pediu, estava ${reais(primeiro.total)}.` : "";
+		const links = [
+			[preco.ida.link, preco.volta ? "Comprar a ida" : "Comprar"],
+			[preco.volta?.link, "Comprar a volta"],
+			[m.planilha, "ver o histórico na planilha"],
+		].filter(([link]) => link).map(([link, nome]) => `<${link}|${nome}>`).join("  ·  ");
+		await avisarDe(config)(m.conversa, `:taki: Au au, preço bom! ${paraGente(m)}: *${reais(preco.total)}* (${motivo}).${desdeOComeco}\n${links}\nPara parar de acompanhar, me manda "cancela o monitoramento ${m.id}".`);
 		atualizarMonitoramento(m.id, { avisado_preco: preco.total });
 	}
 	atualizarMonitoramento(m.id, { menor_preco: estado.menorNovo, falhas: 0, checado_em: estado.agora });

@@ -10,6 +10,7 @@ import { App } from "@slack/bolt";
 
 // puxa a função responder do NOSSO arquivo brain/graph.ts (o "./" quer dizer "aqui nesta mesma pasta")
 import { responder } from "./brain/graph.ts";
+import { explicarErro } from "./brain/checker.ts";
 
 // ---------- CHAVES ----------
 // lê o arquivo .env e guarda cada chave em process.env (depois esse process.env vai dar o valor da chave API em si ao process.env.SLACK_BOT_TOKEN
@@ -36,37 +37,53 @@ function naFila(canal: string, trabalho: () => Promise<void>) {
 // o Slack às vezes entrega a mesma mensagem duas vezes; o "ts" é o id único de cada mensagem
 const mensagensVistas = new Set<string>();
 
+// os canais com um pedido em andamento: quem manda outra mensagem nessa hora fica sabendo que ela entrou na fila
+const ocupados = new Set<string>();
+
+// unfurl desligado: sem isso o Slack pendura um cartão de prévia do Google embaixo de cada link
+const SEM_PREVIA = { unfurl_links: false, unfurl_media: false };
+
 // ---------- RESPONDER ----------
 // toda vez que chegar uma mensagem, o Slack chama esta função
 app.message(async ({ message, say, client }) => {
-	// mensagem editada, apagada etc. tem um "subtype"; só queremos as mensagens normais, que trazem texto
-	if (message.subtype !== undefined) return;
-
-	const texto = message.text;
-	if (texto === undefined) return;    // mensagem só com foto ou arquivo: não tem texto para mandar ao modelo
+	// foto, áudio ou arquivo chegam com subtype "file_share"; editada, apagada etc. têm outros subtypes e ficam de fora
+	if (message.subtype !== undefined && message.subtype !== "file_share") return;
 	if (mensagensVistas.has(message.ts)) return;
+	if (mensagensVistas.size > 5000) mensagensVistas.clear();    // shortcut: a trava só precisa lembrar os últimos minutos, e assim a memória não cresce para sempre
 	mensagensVistas.add(message.ts);
+
+	const texto = message.text?.trim();
+	if (!texto) {
+		// só o arquivo, sem texto: o modelo não lê arquivo, então o bot diz isso em vez de ficar calado
+		const tipo = message.subtype === "file_share" ? message.files?.[0]?.mimetype ?? "" : "";
+		await say(tipo.startsWith("audio") ? "Ainda não consigo ouvir áudio. Me escreve o pedido que eu procuro." : "Ainda não consigo ler foto nem arquivo. Me escreve de onde você sai, para onde vai e quando, que eu procuro.");
+		return;
+	}
 	console.log("Chegou uma mensagem: " + texto);
 
-	await naFila(message.channel, async () => {
-		// uma mensagem de progresso que vai sendo editada e some no fim
-		const aviso = await say(":dog: O Taki está farejando...");
-		const canal = message.channel;
-		const idDoAviso = aviso.ts!;
+	const canal = message.channel;
+	if (ocupados.has(canal)) await say(":taki: Peguei. Termino o pedido anterior e já vejo esse.").catch(console.log);
+
+	await naFila(canal, async () => {
+		ocupados.add(canal);
+		// uma mensagem de progresso que vai sendo editada e some no fim. Ela é só um enfeite: se falhar, o pedido segue
+		const aviso = await say(":taki: O Taki está farejando...").catch(() => undefined);
+		const idDoAviso = aviso?.ts;
 
 		try {
 			// cada canal do Slack é uma conversa separada na memória
 			const resposta = await responder(canal, texto, async (progresso) => {
-				// se o aviso falhar, o pedido continua: ele é só um enfeite
-				await client.chat.update({ channel: canal, ts: idDoAviso, text: progresso }).catch(console.log);
+				if (idDoAviso) await client.chat.update({ channel: canal, ts: idDoAviso, text: progresso }).catch(console.log);
 			});
 			console.log("O bot respondeu: " + resposta);
-			await say(resposta);
+			await say({ text: resposta, ...SEM_PREVIA });
 		} catch (erro: any) {
-			console.log("Deu erro: ", erro);
-			await say("O Taki tropeçou: " + erro.message + "\nManda de novo daqui a pouco que eu continuo de onde parei.");
+			console.log("Deu erro: ", erro);    // o erro técnico fica no log; a pessoa lê o que aconteceu e o que fazer
+			await say(explicarErro(erro)).catch(console.log);
+		} finally {
+			ocupados.delete(canal);
 		}
-		await client.chat.delete({ channel: canal, ts: idDoAviso }).catch(console.log);
+		if (idDoAviso) await client.chat.delete({ channel: canal, ts: idDoAviso }).catch(console.log);
 	});
 });
 
