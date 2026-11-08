@@ -9,7 +9,7 @@
 //
 // Nenhuma regra pode derrubar o nó: quando falta um dado, vira "atencao" em vez de erro.
 
-import { hojeEmSaoPaulo, somarDias } from "../brain/tools.ts";
+import { hojeEmSaoPaulo, somarDias } from "./dates.ts";
 import { paisDoAeroporto } from "./airports.ts";
 import { VISTO, FEBRE_AMARELA } from "./rules-data.ts";
 

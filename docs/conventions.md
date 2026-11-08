@@ -18,7 +18,7 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-11-04T20:47:43Z }
 
 # Pastas
 
-Uma pasta é um trabalho (tabela no `README.md`). `rules/`, `sources/` e `storage/` não deveriam importar de `brain/`. Hoje `rules/rules.ts` e `sources/hotels.ts` ainda importam `brain/tools.ts`: não acrescente outro caso.
+Uma pasta é um trabalho (tabela no `README.md`). `rules/`, `sources/` e `storage/` não importam de `brain/`; o bloco FRONTEIRAS do `quality/tests.ts` confere. O que dois lados usam mora fora de `brain/`, como `rules/dates.ts`.
 
 # Ferramental
 

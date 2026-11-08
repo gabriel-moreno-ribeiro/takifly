@@ -16,7 +16,7 @@ stale_after: 2026-11-11T00:00:00Z
 
 # Item ativo
 
-Nenhum. H15, F26, H16, H17 e H18 passaram pelo `verify-feature.ts` em 08/11 (camada 1, sem crédito).
+Nenhum. H15, F26, H16, H17, H18 e H08 passaram pelo `verify-feature.ts` em 08/11 (camada 1, sem crédito). H08 está só no disco, sem commit.
 
 A pessoa escolheu os modelos em 08/11: glm-5.3 no forte, glm-5.3-flash no barato (`brain/models.ts`). A prova ainda não mediu essa dupla.
 
@@ -36,6 +36,7 @@ Depois: `F13`, o bot só pesquisar com origem, destino e data de cada trecho (cu
 
 ## 2026-11-08
 
+- H08: `hojeEmSaoPaulo` e `somarDias` foram para `rules/dates.ts`; `rules/` e `sources/` não importam mais `brain/`, e o bloco FRONTEIRAS do `quality/tests.ts` confere. `brain/tools.ts` reexporta as duas, então nenhum outro arquivo mudou.
 - Harness dos agentes, a pedido da pessoa: modelo forte e barato por papel (H15), "pronto" conferido por código (F26), especialistas voltando ao orquestrador (H16), agente de contexto (H17) e agente de memória (H18). Detalhes em `docs/AGENCIA.md`, seção "O harness dos agentes".
 - `npm test` agora roda o grafo de ponta a ponta com `ModeloFalso`: dá para testar mudança no grafo sem crédito.
 - O `.env` passou a ser opcional para os testes (`brain/graph.ts`, `brain/tracing.ts`, `sources/email.ts`); `bot.ts` e `watcher.ts` continuam exigindo.

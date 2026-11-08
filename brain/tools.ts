@@ -6,6 +6,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
+import { hojeEmSaoPaulo, somarDias } from "../rules/dates.ts";
 import { descreverAeroporto, nomesDoAeroporto, resolverAeroportos, semAcento } from "../rules/airports.ts";
 import { apagarPreferencia, cancelarMonitoramento, criarMonitoramento, type Dossie, guardarDossie, guardarPreferencia, listarMonitoramentos, listarPreferencias, type Monitoramento } from "../storage/database.ts";
 import { buscarHospedagem, conferirPedido as conferirPedidoDeHospedagem, resumirHospedagens } from "../sources/hotels.ts";
@@ -36,10 +37,8 @@ function cadernoDe(config: any): Caderno {
 const LIMITE_DE_BUSCAS = 12;    // um modelo em loop não pode martelar o Google
 
 // ---------- DATAS ----------
-export function hojeEmSaoPaulo() {
-	return new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" });    // "sv-SE" escreve AAAA-MM-DD
-}
-
+// hojeEmSaoPaulo e somarDias moram em rules/dates.ts; o export abaixo mantém quem já importa daqui funcionando
+export { hojeEmSaoPaulo, somarDias };
 const MESES = [
 	["janeiro", "january", "enero", "janvier", "gennaio", "januar"],
 	["fevereiro", "february", "febrero", "fevrier", "febbraio", "februar"],
@@ -59,10 +58,6 @@ const NOMES_DOS_DIAS = ["domingo", "segunda-feira", "terça-feira", "quarta-feir
 
 export function diaDaSemana(data: string) {
 	return NOMES_DOS_DIAS[new Date(data + "T00:00:00Z").getUTCDay()];
-}
-
-export function somarDias(data: string, dias: number) {
-	return new Date(new Date(data + "T00:00:00Z").getTime() + dias * 86_400_000).toJSON().slice(0, 10);
 }
 
 // monta a data e confere se ela existe: 30/02 vira 02/03 no JavaScript, e aqui isso é erro

@@ -76,8 +76,8 @@
 			"area": "harness",
 			"behavior": "rules/, sources/ e storage/ não importam brain/ (hojeEmSaoPaulo e somarDias vão para rules/), e um teste confere.",
 			"verification": "test -z \"$(grep -rl 'from \"../brain/' rules sources storage)\" && grep -q 'FRONTEIRAS' quality/tests.ts && node quality/tests.ts",
-			"state": "not_started",
-			"evidence": "",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 63a4965 com mudanças sem commit: Tudo certo!",
 			"notes": "aula 10; hoje rules/rules.ts e sources/hotels.ts importam brain/tools.ts"
 		},
 		{

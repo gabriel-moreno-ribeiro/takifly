@@ -14,7 +14,7 @@
 //
 // Para testar sozinho (dentro da pasta passagens.ts/):   node sources/hotels.ts Lisboa 2026-12-12 2026-12-19 2
 
-import { hojeEmSaoPaulo } from "../brain/tools.ts";
+import { hojeEmSaoPaulo } from "../rules/dates.ts";
 
 // o formato de cada hospedagem
 export type Hospedagem = {
