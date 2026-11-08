@@ -5,10 +5,11 @@
 import assert from "node:assert";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 
-import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { AIMessage, AIMessageChunk, type BaseMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 
 import { AGENTES, planoValido } from "../brain/agents.ts";
-import { atualizarMonitoramento, buscasDoDia, criarMonitoramento, listarHistorico, listarMonitoramentos, listarPreferencias, somarBuscasDoDia } from "../storage/database.ts";
+import { atualizarMonitoramento, buscasDoDia, criarMonitoramento, guardarPreferencia, listarHistorico, listarMonitoramentos, listarPreferencias, somarBuscasDoDia } from "../storage/database.ts";
 import { checarMonitoramentos } from "../brain/price-watch.ts";
 import { conferirLugar, dataFoiDita, entenderClasse, entenderData, limparArgumentos, REGISTRO, servicos, todasAsFerramentas, type Caderno } from "../brain/tools.ts";
 import { montarAbas, servicos as planilhas } from "../sources/spreadsheet.ts";
@@ -26,7 +27,7 @@ import { lerCsv } from "../rules/update-airports-data.ts";
 // O grafo abre o checkpoint ao ser carregado, por isso ele vem depois do MEMORIA, por await import.
 process.env.DADOS = ":memory:";
 process.env.MEMORIA = ":memory:";
-const { comIdNovo, cortarHistorico, historicoLimpo, noFerramentas, noSituacao, regrasDaViagem, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
+const { comIdNovo, cortarHistorico, fatosParaGuardar, grafo, historicoLimpo, modelos, noContexto, noFerramentas, noLembrar, noSituacao, regrasDaViagem, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
 
 // ---------- HISTÓRICO ----------
 const pergunta = new HumanMessage("oi");
@@ -1086,6 +1087,202 @@ assert.deepEqual(resolverAeroportos("International Falls"), ["INL"]);
 assert.throws(() => resolverAeroportos("xpto"), /não conheço/);
 assert.throws(() => resolverAeroportos("asdfghjkl"), /não conheço/);
 
+// ---------- O GRAFO INTEIRO, COM MODELO FALSO ----------
+// o grafo roda de ponta a ponta sem crédito: cada modelo falso devolve, em ordem, as respostas de um roteiro.
+// Chamar o modelo uma vez a mais quebra com "o roteiro acabou"; uma vez a menos, com o roteiro sobrando.
+// As rotas são dentro do Brasil: assim o nó conferir não manda nota nenhuma ao Langfuse.
+class ModeloFalso extends BaseChatModel {
+	roteiro: AIMessage[];
+	cartas: BaseMessage[][] = [];
+	constructor(roteiro: AIMessage[]) {
+		super({});
+		this.roteiro = roteiro;
+	}
+	_llmType() {
+		return "falso";
+	}
+	bindTools() {
+		return this;
+	}
+	async _generate(carta: BaseMessage[]) {
+		this.cartas.push(carta);
+		const proxima = this.roteiro.shift();
+		if (!proxima) throw new Error("o roteiro do modelo falso acabou: o grafo chamou o modelo uma vez a mais");
+		// o ChatOpenAI devolve AIMessageChunk, e o withStructuredOutput só aceita esse tipo
+		const message = new AIMessageChunk({ content: proxima.content, tool_calls: proxima.tool_calls });
+		return { generations: [{ message, text: message.text }] };
+	}
+}
+let idDaChamada = 0;
+const pediu = (name: string, args: Record<string, unknown>) => new AIMessage({ content: "", tool_calls: [{ id: `falso-${++idDaChamada}`, name, args }] });
+const planoFalso = (...agentes: string[]) => pediu("definir_plano", { agentes, idioma: "português" });
+const textoDa = (carta: BaseMessage[]) => carta.map((mensagem) => mensagem.text).join("\n");
+
+async function rodarComFalsos(conversa: string, texto: string, forte: AIMessage[], especialista: AIMessage[]) {
+	const falsos = { forte: new ModeloFalso(forte), especialista: new ModeloFalso(especialista) };
+	Object.assign(modelos, falsos);
+	const estado = await grafo.invoke({ messages: [new HumanMessage(texto)] }, { configurable: { thread_id: conversa } });
+	assert.deepEqual(falsos.forte.roteiro, [], `${conversa}: o modelo forte foi chamado menos vezes do que o roteiro previa`);
+	assert.deepEqual(falsos.especialista.roteiro, [], `${conversa}: o modelo barato foi chamado menos vezes do que o roteiro previa`);
+	return { estado, ...falsos };
+}
+servicos.buscarVoos = (async (origem: string, destino: string, data: string) => [{ ...voo, origem, destino, data }, { ...barata, origem, destino, data }]) as any;
+servicos.criarPlanilha = (async () => "https://planilha.falsa/1") as any;
+
+// "oi": o forte faz o plano vazio e escreve; o barato nem é chamado; o redator recebe a situação atual
+let rodada = await rodarComFalsos("falso-oi", "oi", [planoFalso(), new AIMessage("Oi! Nada rodando agora. Quer que eu procure algum voo?")], []);
+assert.equal(rodada.estado.messages.at(-1).text, "Oi! Nada rodando agora. Quer que eu procure algum voo?");
+assert.match(textoDa(rodada.forte.cartas[1]), /nada em andamento/);
+
+// uma busca: o forte planeja e escreve, o barato pede a ferramenta e diz "pronto", e a planilha sai pelo código
+rodada = await rodarComFalsos("falso-busca", "voos de GRU para REC em 12/12",
+	[planoFalso("pesquisador"), new AIMessage("Achei voos de GRU para Recife. Quer só os diretos?")],
+	[pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "12/12" }), new AIMessage("*Pronto!*")]);    // "Pronto!" também vale, sem refazer o plano
+assert.equal(rodada.estado.buscas.length, 1);
+assert.match(rodada.estado.messages.at(-1).text, /Planilha: https:\/\/planilha\.falsa\/1/);
+assert.match(textoDa(rodada.forte.cartas[1]), /GRU→REC/);    // o redator viu o resultado da busca
+
+// "pronto" sem ter feito a tarefa não tira o especialista do plano: o código manda ele de volta, com um bilhete
+rodada = await rodarComFalsos("falso-pronto-vazio", "voos de GRU para REC em 13/12",
+	[planoFalso("pesquisador"), new AIMessage("Achei voos de GRU para Recife.")],
+	[new AIMessage("pronto"), pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "13/12" }), new AIMessage("pronto")]);
+assert.match(textoDa(rodada.especialista.cartas[1]), /não chamou nenhuma ferramenta da sua tarefa/);
+assert.equal(rodada.estado.buscas.length, 1);
+
+// mas se ele tentou e a ferramenta recusou, ninguém insiste: o Erro já diz ao redator o que perguntar.
+// E a preferência "mora em Natal" não solta a trava da data (antes, "Natal" contava como a data 25/12)
+guardarPreferencia("falso-natal", "mora em Natal");
+rodada = await rodarComFalsos("falso-natal", "quero ir de GRU para REC",
+	[planoFalso("pesquisador"), new AIMessage("Para qual dia você quer ir?")],
+	[pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "17/12" }), new AIMessage("pronto")]);
+assert.equal(rodada.estado.buscas.length, 0);
+assert.deepEqual(rodada.estado.feitos, ["pesquisador: a ferramenta recusou"]);
+assert.match(textoDa(rodada.forte.cartas[1]), /não aparece no pedido/);
+// a preferência continua valendo para o lugar: "moro em Recife" deixa REC ser a origem
+assert.deepEqual(conferirLugar({ ...cadernoNovo(["voos para Lisboa em 12/12"]), preferencias: ["mora em Recife"] }, "Recife"), ["REC"]);
+assert.throws(() => conferirLugar(cadernoNovo(["voos para Lisboa em 12/12"]), "Recife"), /não aparece no pedido/);
+
+// o especialista volta ao orquestrador. Quem voltou sem terminar faz ele refazer o plano; quem terminou, não
+// gasta chamada. Aqui o primeiro plano está errado (analista sem voos) e o segundo conserta
+rodada = await rodarComFalsos("falso-replano", "qual o voo mais barato de GRU para REC em 14/12?",
+	[planoFalso("analista"), planoFalso("pesquisador", "analista"), new AIMessage("O mais barato de GRU para Recife é o da Barata.")],
+	[new AIMessage("faltou: nenhum voo pesquisado ainda"), pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "14/12" }), new AIMessage("pronto"), pediu("filtrar_voos", {}), new AIMessage("O mais barato é o da Barata.")]);
+// o analista deixou a resposta como recado em vez de "pronto": como a ferramenta dele respondeu, conta como terminou
+assert.deepEqual(rodada.estado.feitos, ["analista: faltou: nenhum voo pesquisado ainda", "pesquisador: terminou", "analista: terminou"]);
+assert.equal(rodada.estado.replanos, 1);
+assert.match(textoDa(rodada.forte.cartas[1]), /O QUE JÁ ACONTECEU[\s\S]*analista: faltou/);
+assert.doesNotMatch(textoDa(rodada.forte.cartas[2]), /nenhum voo pesquisado/);    // o "faltou" resolvido não chega ao redator
+assert.match(textoDa(rodada.forte.cartas[2]), /analista: O mais barato é o da Barata/);
+
+// ao refazer o plano, quem já resolveu a sua parte não é chamado de novo, mesmo que o modelo peça
+rodada = await rodarComFalsos("falso-nao-repete", "voos de GRU para REC em 15/12 e o mais rápido",
+	[planoFalso("pesquisador", "analista"), planoFalso("pesquisador", "analista"), new AIMessage("O mais rápido de GRU para Recife é o da Direta.")],
+	[pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "15/12" }), new AIMessage("pronto"), new AIMessage("faltou: qual critério usar"), pediu("filtrar_voos", { ordenar_por: "duracao" }), new AIMessage("pronto")]);
+assert.deepEqual(rodada.estado.feitos, ["pesquisador: terminou", "analista: faltou: qual critério usar", "analista: terminou"]);
+assert.equal(rodada.estado.buscas.length, 1);
+
+// refazer o plano tem limite: na terceira volta sem terminar, o código encerra e o redator responde com o que tem
+rodada = await rodarComFalsos("falso-limite-de-replanos", "me ajuda",
+	[planoFalso("memoria"), planoFalso("monitor"), planoFalso("analista"), new AIMessage("Me conta o que você precisa: um voo, um hotel?")],
+	[new AIMessage("faltou: não sei o que guardar"), new AIMessage("faltou: qual rota acompanhar"), new AIMessage("faltou: nenhum voo pesquisado")]);
+assert.equal(rodada.estado.replanos, 2);
+assert.equal(rodada.estado.feitos.length, 3);
+
+// ao refazer o plano, o modelo responde em texto, sem chamar definir_plano: o pedido não quebra, o redator responde
+// com o que tem (na prova de 08/11 isso derrubava o bot com "reading 'agentes'")
+rodada = await rodarComFalsos("falso-replano-sem-plano", "me ajuda",
+	[planoFalso("memoria"), new AIMessage("acho que ninguém"), new AIMessage("Me conta o que você precisa: um voo, um hotel?")],
+	[new AIMessage("faltou: não sei o que guardar")]);
+assert.equal(rodada.estado.replanos, 1);
+assert.equal(rodada.estado.messages.at(-1).text, "Me conta o que você precisa: um voo, um hotel?");
+
+// o agente de contexto: frase com valor (em qualquer moeda), horário, duração, link ou documento sai do resumo; o resto fica
+assert.equal(
+	resumoLimpo("A pessoa mora em Recife e quer ir a Lisboa em 12/12. O voo da TAP custou R$ 3000. Sai às 10:30.\nPrefere voo direto. O voo dura 11h40. Viu em https://x.com"),
+	"A pessoa mora em Recife e quer ir a Lisboa em 12/12. Prefere voo direto.",
+);
+assert.equal(resumoLimpo("Viaja com a filha. Pagaria US$ 500. Ou 300 euros. O total deu 2.810. O passaporte vence em março."), "Viaja com a filha.");
+
+// Assim que uma mensagem sai da janela de 40 sem estar no resumo, ele resume as que saíram e as 20 seguintes:
+// nada fica no buraco, e a próxima chamada só vem depois de mais 20 mensagens
+const conversaLonga = Array.from({ length: 30 }, (_, i) => [new HumanMessage(`pergunta ${i}`), new AIMessage(`resposta ${i}`)]).flat();
+const contextoFalso = new ModeloFalso([new AIMessage("A pessoa mora em Recife e quer ir a Lisboa. O voo custou R$ 3000.")]);
+modelos.especialista = contextoFalso;
+const comResumo = await noContexto({ messages: conversaLonga, resumo: "", resumoAte: 0 } as any);
+assert.deepEqual(comResumo, { resumo: "A pessoa mora em Recife e quer ir a Lisboa.", resumoAte: 40 });
+assert.match(textoDa(contextoFalso.cartas[0]), /Pessoa: pergunta 0\nBot: resposta 0[\s\S]*Bot: resposta 19$/);
+assert.doesNotMatch(textoDa(contextoFalso.cartas[0]), /pergunta 20\b/);
+assert.deepEqual(await noContexto({ messages: conversaLonga, resumo: "x", resumoAte: 40 } as any), {});    // o que saiu já está no resumo
+assert.equal(contextoFalso.cartas.length, 1);
+// uma conversa antiga, com 400 mensagens fora da janela: o primeiro resumo lê só as 60 mais recentes delas (e as 20 seguintes)
+const conversaAntiga = Array.from({ length: 220 }, (_, i) => [new HumanMessage(`pergunta ${i}`), new AIMessage(`resposta ${i}`)]).flat();
+contextoFalso.roteiro.push(new AIMessage("A pessoa quer ir a Lisboa."));
+assert.deepEqual(await noContexto({ messages: conversaAntiga, resumo: "", resumoAte: 0 } as any), { resumo: "A pessoa quer ir a Lisboa.", resumoAte: 420 });
+assert.doesNotMatch(textoDa(contextoFalso.cartas[1]), /pergunta 169\b/);
+assert.match(textoDa(contextoFalso.cartas[1]), /Pessoa: pergunta 170\n[\s\S]*Bot: resposta 209$/);
+// se o modelo falhar, o pedido segue sem resumo
+assert.deepEqual(await noContexto({ messages: conversaLonga, resumo: "", resumoAte: 0 } as any), {});
+
+// o resumo chega às instruções do orquestrador e do redator, e não entra na conversa
+await grafo.updateState({ configurable: { thread_id: "falso-com-resumo" } }, { resumo: "A pessoa mora em Recife." });
+rodada = await rodarComFalsos("falso-com-resumo", "oi", [planoFalso(), new AIMessage("Oi! Quer que eu procure algum voo saindo de Recife?")], []);
+assert.match(textoDa(rodada.forte.cartas[0]), /Resumo da conversa mais antiga[^\n]*: A pessoa mora em Recife\./);
+assert.match(textoDa(rodada.forte.cartas[1]), /Resumo da conversa mais antiga/);
+assert.equal(rodada.estado.messages.filter((mensagem: BaseMessage) => /mora em Recife/.test(mensagem.text)).length, 0);
+
+// o agente de memória: o modelo propõe, o código decide. Fica o fato curto, sem número, com palavra da pessoa e sem repetir
+const contouDePassagem = "moro em Recife e prefiro voo direto, quero ir a Lisboa dia 12";
+// "vai a Lisboa" é o pedido de agora: escapou da primeira versão (08/11), e agora o fato precisa começar com verbo de coisa que dura
+assert.deepEqual(fatosParaGuardar({ guardar: ["mora em Recife", "prefere voo direto", "vai a Lisboa", "vai a Lisboa dia 12", "adora Paris", "Mora em Recife "], trocar: [] }, [], contouDePassagem), { novos: ["mora em Recife", "prefere voo direto"], velhos: [] });
+// trocar uma preferência só vale junto com a nova; apagar sozinho é do especialista memoria
+const jaGuardada = [{ id: 1, texto: "mora em Recife" }];
+assert.deepEqual(fatosParaGuardar({ guardar: ["mora em São Paulo"], trocar: ["mora em recife"] }, jaGuardada, "agora moro em São Paulo"), { novos: ["mora em São Paulo"], velhos: jaGuardada });
+assert.deepEqual(fatosParaGuardar({ guardar: [], trocar: ["mora em Recife"] }, jaGuardada, "não moro mais em Recife"), { novos: [], velhos: [] });
+// com 20 guardadas, nada novo entra
+assert.deepEqual(fatosParaGuardar({ guardar: ["prefere janela"] , trocar: [] }, Array.from({ length: 20 }, (_, i) => ({ id: i, texto: `preferência ${i}` })), "prefiro janela").novos, []);
+// o que a revisão de 08/11 achou passando: fato de outra pessoa, saúde, o que a pessoa não disse e valor por extenso
+const nada = (fato: string, mensagem: string) => assert.deepEqual(fatosParaGuardar({ guardar: [fato], trocar: [] }, [], mensagem).novos, [], fato);
+nada("mora em Portugal", "minha sogra mora em Portugal e eu quero visitar");
+nada("nunca viaja sem insulina", "nunca viajo sem insulina");
+nada("sempre viaja de executiva", "quero voar de executiva");
+nada("sempre viaja com um real no bolso", "sempre viajo com um real no bolso");
+nada("prefere voo direto e janela", "prefiro voo direto");                     // "janela" a pessoa não disse
+assert.deepEqual(fatosParaGuardar({ guardar: ["sempre viaja de executiva", "viaja com os filhos", "prefere voos diretos"], trocar: [] }, [], "sempre viajo de executiva com meus filhos, prefiro voo direto").novos, ["sempre viaja de executiva", "prefere voos diretos"]);
+
+// o nó de verdade, com o banco em memória. Ele roda no fim do pedido, então a última mensagem é a resposta do bot.
+// Sem pista, com pedido explícito ("lembra disso") ou com o especialista memoria no pedido, nem chama o modelo
+const memoriaFalsa = new ModeloFalso([pediu("lembrar", { guardar: ["mora em Recife", "prefere voo direto", "vai a Lisboa"], trocar: [] })]);
+modelos.especialista = memoriaFalsa;
+const naConversa = { configurable: { thread_id: "falso-lembrar" } };
+const fimDoPedido = (texto: string, feitos: string[] = []) => ({ messages: [new HumanMessage(texto), new AIMessage("Achei voos.")], feitos }) as any;
+await noLembrar(fimDoPedido("voos de GRU para Lisboa em 12/12"), naConversa);
+await noLembrar(fimDoPedido("moro em Recife, lembra disso"), naConversa);
+await noLembrar(fimDoPedido("sempre prefiro voos diretos", ["memoria: terminou"]), naConversa);    // senão ficariam duas cópias
+assert.equal(memoriaFalsa.cartas.length, 0);
+await noLembrar(fimDoPedido(contouDePassagem), naConversa);
+assert.deepEqual(listarPreferencias("falso-lembrar").map((preferencia) => preferencia.texto), ["mora em Recife", "prefere voo direto"]);
+assert.match(textoDa(memoriaFalsa.cartas[0]), /Já guardado: nada/);
+// se o modelo falhar, o pedido segue sem memória nova
+await noLembrar(fimDoPedido("prefiro janela"), naConversa);
+assert.equal(listarPreferencias("falso-lembrar").length, 2);
+
+// no grafo, o agente de memória é o último nó: a resposta continua sendo a última mensagem
+rodada = await rodarComFalsos("falso-lembrar-no-grafo", "oi, eu moro em Natal",
+	[planoFalso(), new AIMessage("Oi! Quer que eu procure algum voo saindo de Natal?")],
+	[pediu("lembrar", { guardar: ["mora em Natal"], trocar: [] })]);
+assert.equal(rodada.estado.messages.at(-1).text, "Oi! Quer que eu procure algum voo saindo de Natal?");
+assert.deepEqual(listarPreferencias("falso-lembrar-no-grafo").map((preferencia) => preferencia.texto), ["mora em Natal"]);
+
+// a tarefa cumprida, conferida por código: erro não conta, e listar aeroportos não é pesquisar
+const chamou = (nome: string, retorno: string) => [new AIMessage({ content: "", tool_calls: [{ id: nome, name: nome, args: {} }] }), new ToolMessage({ tool_call_id: nome, content: retorno })];
+const pedidoCom = (...mensagens: BaseMessage[]) => [new HumanMessage("pedido antigo"), ...chamou("buscar_voos", "voos velhos"), new HumanMessage("pedido novo"), ...mensagens];
+assert.equal(terminou("pesquisador", pedidoCom()), false);                                        // a busca do pedido anterior não vale
+assert.equal(terminou("pesquisador", pedidoCom(...chamou("listar_aeroportos", "GRU, CGH, VCP"))), false);
+assert.equal(terminou("pesquisador", pedidoCom(...chamou("buscar_voos", "Erro: a data não aparece no pedido"))), false);
+assert.equal(terminou("pesquisador", pedidoCom(...chamou("buscar_hoteis", "não achei hospedagem"))), true);
+assert.equal(terminou("analista", pedidoCom(...chamou("filtrar_voos", "1 voos passam"))), true);
+assert.equal(terminou("analista", pedidoCom(...chamou("buscar_voos", "voos"))), false);           // ferramenta de outro agente
+
 // ---------- LISTA DE FUNCIONALIDADES ----------
 // feature_list.json é onde mora o estado de cada item: um ativo por vez, e passing só com evidência
 const RAIZ = import.meta.dirname + "/..";
@@ -1100,6 +1297,15 @@ for (const item of lista.features) {
 }
 const ativos = lista.features.filter((item) => item.state === "active").map((item) => item.id);
 assert.ok(ativos.length <= 1, `só um item pode estar active, e há ${ativos.length}: ${ativos.join(", ")}. Termine ou marque blocked antes de ativar outro`);
+
+// ---------- FRONTEIRAS ----------
+// rules/, sources/ e storage/ são peças soltas: o cérebro usa elas, elas não usam o cérebro
+for (const pasta of ["rules", "sources", "storage"]) {
+	for (const nome of readdirSync(`${RAIZ}/${pasta}`).filter((nome) => nome.endsWith(".ts"))) {
+		const texto = readFileSync(`${RAIZ}/${pasta}/${nome}`, "utf8");
+		assert.ok(!/from\s+["']\.\.\/brain\//.test(texto), `${pasta}/${nome} importa de brain/: mova o que ele precisa para rules/, sources/ ou storage/ (veja rules/dates.ts)`);
+	}
+}
 
 // ---------- MAPA DOS DOCS ----------
 // o AGENTS.md é o mapa: todo doc tem cabeçalho OKF, aparece no mapa, e tudo o que o mapa cita existe

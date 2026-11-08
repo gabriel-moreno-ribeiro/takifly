@@ -10,26 +10,41 @@ stale_after: 2026-11-11T00:00:00Z
 
 # Estado verificado
 
-- Último commit: `2b05fcb` (05/11), com a reorganização em pastas e o harness.
-- `npm test`: Tudo certo! em 2026-11-05 (65 s, sem rede, sem modelo e sem abrir `data/`).
-- Serviços: `com.takifly.bot` e `com.takifly.watcher` rodando no launchd com o código de 04/11 15:49.
+- Main em `51b6b8a`. O harness dos agentes de 08/11 está commitado na branch `gabriel-moreno-ribeiro/melhorar-harness-agentes-bot` (worktree `cuskeel`), ainda sem merge na main.
+- `npm test`: Tudo certo! em 2026-11-08 na worktree, sem `.env` (agora ele é opcional para os testes), com o grafo inteiro rodando em modelos falsos.
+- Serviços: `com.takifly.bot` e `com.takifly.watcher` rodando no launchd com o código da pasta principal; nada de 08/11 chegou neles.
 
 # Item ativo
 
-Nenhum. Próximo sugerido: `F13`, o bot só pesquisar com origem, destino e data de cada trecho, e perguntar o que faltar.
+Nenhum. H15, F26, H16, H17, H18 e H08 passaram pelo `verify-feature.ts` em 08/11 (camada 1, sem crédito). H08 está só no disco, sem commit.
 
-- Por que agora: é a regra que a pessoa pediu em 05/11, e é o que trava pedidos como a viagem de 4 trechos.
-- Pronto quando: a `verification` do F13 passa (custa crédito: 7 cenários da prova).
-- Não mudar neste passo: os juízes da prova e o verificador.
+A pessoa escolheu os modelos em 08/11: glm-5.3 no forte, glm-5.3-flash no barato (`brain/models.ts`). A prova ainda não mediu essa dupla.
+
+Próximo passo, que é da pessoa porque gasta crédito: `node quality/exam.ts` (284 casos, ~40 s cada; grava em `results/glm-5.3+glm-5.3-flash.jsonl`) e comparar com `results/glm-5.3.jsonl`. Se a nota de Fatos cair, o flash volta a ser só uma opção.
+- Antes de pôr no bot: commit, merge e `node takifly.ts restart`, quando a pessoa pedir.
+
+Depois: `F13`, o bot só pesquisar com origem, destino e data de cada trecho (custa crédito: 7 cenários da prova).
 
 # Histórico da prova
 
 | Data | Commit | Modelo | Cenários | Fatos | Escrita | Piores famílias |
 |---|---|---|---|---|---|---|
+| 2026-11-08 | 63a4965 | glm-5.3 + glm-5.3-flash | 284 | 278/284; com o conserto 6048585 os 6 que falharam rodaram de novo e 4 passaram (~280/284) | | seguimento-mais-rapido (preço atribuído à Azul), lugar-sao-jose (não perguntou qual São José). Antes 282/284 com o grafo antigo. 26 s por caso, contra 37 s |
 | 2026-11-03 | sem commit | glm-5.3 | 10 mil gerados | 9767/10000 | 4,26/5 | saudacao 203/250, hotel 390/450, classe 369/400 |
 | 2026-10-30 | f52b5ee | glm-5.3, gemma4:31b, gpt-oss:20b, nemotron-3-nano:30b | 284 | ver `node quality/scoreboard.ts` (hoje quebra, item H09) | | |
 
 # Sessões
+
+## 2026-11-08
+
+- Prova da dupla glm-5.3 + glm-5.3-flash: 278/284. Achou um defeito do grafo novo (replano sem plano derrubava o pedido), consertado em `6048585` com teste. Sobraram 2 falhas do modelo forte, a investigar. A pessoa escolheu pôr no ar mesmo com Fatos ~2 abaixo; PR #2 com merge.
+- Não reiniciei: a pasta principal tem o trabalho do WhatsApp sem commit (bot.ts, watcher.ts, sources/whatsapp.ts). O restart espera a pessoa decidir o que fazer com ele.
+- H08: `hojeEmSaoPaulo` e `somarDias` foram para `rules/dates.ts`; `rules/` e `sources/` não importam mais `brain/`, e o bloco FRONTEIRAS do `quality/tests.ts` confere. `brain/tools.ts` reexporta as duas, então nenhum outro arquivo mudou.
+- Harness dos agentes, a pedido da pessoa: modelo forte e barato por papel (H15), "pronto" conferido por código (F26), especialistas voltando ao orquestrador (H16), agente de contexto (H17) e agente de memória (H18). Detalhes em `docs/AGENCIA.md`, seção "O harness dos agentes".
+- `npm test` agora roda o grafo de ponta a ponta com `ModeloFalso`: dá para testar mudança no grafo sem crédito.
+- O `.env` passou a ser opcional para os testes (`brain/graph.ts`, `brain/tracing.ts`, `sources/email.ts`); `bot.ts` e `watcher.ts` continuam exigindo.
+- Uma revisão independente achou 10 problemas na primeira versão (o pior: preferência guardada soltava a trava da data). Todos consertados, cada um com teste.
+- Não rodei a prova (gasta crédito). Commit na branch a pedido da pessoa; merge e restart, quando ela pedir.
 
 ## 2026-11-05
 

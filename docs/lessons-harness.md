@@ -30,7 +30,7 @@ Os itens marcados `falta` têm id no `feature_list.json`.[^curso]
 | 06 | Inicializar é uma fase própria, antes de qualquer trabalho | agente | `bash init.sh`: Node, dependências, chaves, testes, git e serviços | `já existe` |
 | 06 | Pré-requisito faltando tem que avisar ao ligar, não no meio | bot | `bot.ts` e `watcher.ts` sem `.env` morrem com stack trace, e o launchd religa a cada 10 s | `falta` |
 | 07 | Um item ativo por vez (WIP=1) | os dois | No bot, o plano é uma fila e cada canal tem a sua. No repositório, no máximo um `active` no `feature_list.json`, conferido por `npm test` | `já existe` |
-| 07 | O especialista sai por conclusão, não por cansaço | bot | `criarEspecialista` sai por contagem (`PASSOS_POR_AGENTE`) ou dizendo "pronto"; ninguém confere se a busca foi feita | `falta` |
+| 07 | O especialista sai por conclusão, não por cansaço | bot | `terminou()` em `graph.ts` confere se uma ferramenta da tarefa respondeu sem erro neste pedido; "pronto" sem isso volta com bilhete, e a contagem (`PASSOS_POR_AGENTE`) fica só de freio | `já existe` — desde 08/11 (F26) |
 | 08 | Lista de funcionalidades é primitiva: comportamento + verificação + estado | agente | `feature_list.json`, validado por `npm test` | `já existe` |
 | 08 | Quem muda para passing é o harness, depois de rodar a verificação | agente | `node quality/verify-feature.ts <id>` | `já existe` |
 | 08 | Documento pode ser ignorado, primitiva não | agente | "Antes de reiniciar, Tudo certo!" ainda é só texto: `node takifly.ts restart` não roda os testes | `falta` |

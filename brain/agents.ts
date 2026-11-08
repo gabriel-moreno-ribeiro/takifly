@@ -70,7 +70,16 @@ export const Plano = z.object({
 	idioma: z.string().describe("O idioma da última mensagem do usuário, como português ou inglês"),
 });
 
-export function instrucoesDoOrquestrador(temVoos: boolean) {
+// feitos: quem já voltou neste pedido. Só chega aqui quando alguém voltou sem terminar, e aí o plano é refeito.
+export function instrucoesDoOrquestrador(temVoos: boolean, feitos: string[] = []) {
+	const deNovo = feitos.length === 0 ? "" : `
+
+O QUE JÁ ACONTECEU NESTE PEDIDO (cada agente voltou para você):
+${feitos.map((feito) => `- ${feito}`).join("\n")}
+Refaça o plano: devolva só os agentes que ainda precisam trabalhar. Lista vazia encerra, e outro agente escreve a resposta.
+- Se um agente disse que falta saber algo do usuário (data, origem, destino, passageiros), devolva lista vazia: a resposta vai perguntar.
+- Se o analista disse que não há voos pesquisados e o pedido tem origem, destino e data, devolva ["pesquisador", "analista"].
+- Não chame de novo quem terminou.`;
 	return `Você é o orquestrador do Takifly, um bot de passagens aéreas. Você não responde ao usuário: só devolve o plano.
 Há voos já pesquisados nesta conversa: ${temVoos ? "sim" : "não"}.
 
@@ -97,7 +106,32 @@ Exemplos da última mensagem e do plano:
 "qual a capital da França?" -> []
 "quero viajar" -> []
 
-Devolva sempre os agentes e o idioma da última mensagem do usuário.`;
+Devolva sempre os agentes e o idioma da última mensagem do usuário.${deNovo}`;
+}
+
+// ---------- O AGENTE DE CONTEXTO ----------
+// resume o que vai sair da janela de mensagens. Roda no modelo barato, e o graph.ts ainda limpa o que ele escrever.
+export const INSTRUCOES_DO_RESUMO = `Você resume uma conversa antiga entre uma pessoa e o Takifly, um bot de passagens aéreas, para o bot lembrar dela depois.
+Junte o resumo de antes com a conversa nova num texto só, de no máximo 6 frases curtas, em português.
+Guarde só o que a pessoa contou ou pediu e ainda pode valer: de onde e para onde quer ir, datas, quantas pessoas, preferências, decisões.
+Não escreva preço, valor, horário, duração nem link: isso muda e precisa ser pesquisado de novo. Não escreva documento (passaporte, nascimento, vacina, visto): ele fica guardado em outro lugar.
+Escreva só o resumo, sem título.`;
+
+// ---------- O AGENTE DE MEMÓRIA ----------
+// lê a mensagem nova e propõe o que vale lembrar nas próximas viagens. Roda no modelo barato, e o graph.ts
+// só guarda o que passar na conferência de código (fatosParaGuardar).
+export const Lembrete = z.object({
+	guardar: z.array(z.string()).describe("Fatos novos e duráveis sobre o usuário, curtos, na terceira pessoa. Pode ser vazia"),
+	trocar: z.array(z.string()).describe("Preferências já guardadas que a mensagem nova desmente, copiadas exatamente. Pode ser vazia"),
+});
+
+export function instrucoesDaMemoria(guardadas: string[]) {
+	return `Você cuida da memória do Takifly, um bot de passagens aéreas. Leia a mensagem do usuário e devolva o que vale lembrar nas próximas viagens.
+Guarde só fatos duráveis que a pessoa conta sobre ela mesma: onde mora, de que aeroporto costuma sair, preferências de voo (direto, janela, companhia), com quem costuma viajar.
+Não guarde o pedido de agora (destino, data, passageiros desta viagem), preço, data, número, documento, saúde, religião, nem o que ela conta de outra pessoa.
+Escreva cada fato curto, na terceira pessoa e com as palavras do usuário, começando por um destes verbos: mora, vive, é de, sai de, prefere, evita, gosta, não gosta, odeia, detesta, costuma, viaja com, sempre, nunca. Exemplos: "mora em Recife", "prefere voo direto".
+Já guardado: ${guardadas.length > 0 ? guardadas.join("; ") : "nada"}. Não repita. Se a mensagem desmentir algo já guardado, copie o antigo em trocar e escreva o novo em guardar.
+Na dúvida, devolva as duas listas vazias.`;
 }
 
 // o orquestrador é um modelo, então o código confere o plano: tira nomes inventados e repetidos e põe na ordem certa
@@ -106,7 +140,6 @@ export function planoValido(agentes: string[]) {
 }
 
 // ---------- O REDATOR ----------
-// é o único que fala com o usuário, e não tem nenhuma ferramenta
 export function instrucoesDoRedator(idioma: string, preferencias: string[], recados: string[]) {
 	const guardadas = preferencias.length > 0 ? `\nPreferências guardadas (não são fatos sobre voos): ${preferencias.join("; ")}.` : "";
 	const dosAgentes = recados.length > 0 ? `\nRecados dos outros agentes: ${recados.join(" | ")}.` : "";

@@ -11,9 +11,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 
 import { gerarCenarios } from "./scenarios-10k.ts";
+import { rotuloDosModelos } from "../brain/models.ts";
 
 const PORTA = 4400;
-const MODELO = process.env.MODELO ?? "glm-5.3";
+const MODELO = rotuloDosModelos();    // o mesmo nome que a prova grava
 const PASTA = import.meta.dirname + "/../results";
 const ARQUIVO = `${PASTA}/${MODELO.replaceAll(":", "-")}-10k.jsonl`;
 const ESTILO = ARQUIVO.replace(/\.jsonl$/, ".estilo.jsonl");

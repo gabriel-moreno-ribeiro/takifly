@@ -6,6 +6,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
+import { hojeEmSaoPaulo, somarDias } from "../rules/dates.ts";
 import { descreverAeroporto, nomesDoAeroporto, resolverAeroportos, semAcento } from "../rules/airports.ts";
 import { apagarPreferencia, cancelarMonitoramento, criarMonitoramento, type Dossie, guardarDossie, guardarPreferencia, listarMonitoramentos, listarPreferencias, type Monitoramento } from "../storage/database.ts";
 import { buscarHospedagem, conferirPedido as conferirPedidoDeHospedagem, resumirHospedagens } from "../sources/hotels.ts";
@@ -23,6 +24,9 @@ export type Caderno = {
 	novos: Voo[];                // o que ainda não foi para uma planilha
 	buscas: string[];            // as buscas feitas neste pedido
 	textosDoUsuario: string[];   // o que a pessoa escreveu: serve para conferir se a data foi mesmo dita
+	// as preferências guardadas, separadas: só a trava do lugar as usa. Misturadas aos textos, "mora em Natal"
+	// contava como a data "Natal" e soltava qualquer data, e o .at(-1) lia a preferência no lugar da última mensagem
+	preferencias?: string[];
 	conversa: string;            // de quem são os monitoramentos e as preferências
 };
 
@@ -33,10 +37,8 @@ function cadernoDe(config: any): Caderno {
 const LIMITE_DE_BUSCAS = 12;    // um modelo em loop não pode martelar o Google
 
 // ---------- DATAS ----------
-export function hojeEmSaoPaulo() {
-	return new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sao_Paulo" });    // "sv-SE" escreve AAAA-MM-DD
-}
-
+// hojeEmSaoPaulo e somarDias moram em rules/dates.ts; o export abaixo mantém quem já importa daqui funcionando
+export { hojeEmSaoPaulo, somarDias };
 const MESES = [
 	["janeiro", "january", "enero", "janvier", "gennaio", "januar"],
 	["fevereiro", "february", "febrero", "fevrier", "febbraio", "februar"],
@@ -56,10 +58,6 @@ const NOMES_DOS_DIAS = ["domingo", "segunda-feira", "terça-feira", "quarta-feir
 
 export function diaDaSemana(data: string) {
 	return NOMES_DOS_DIAS[new Date(data + "T00:00:00Z").getUTCDay()];
-}
-
-export function somarDias(data: string, dias: number) {
-	return new Date(new Date(data + "T00:00:00Z").getTime() + dias * 86_400_000).toJSON().slice(0, 10);
 }
 
 // monta a data e confere se ela existe: 30/02 vira 02/03 no JavaScript, e aqui isso é erro
@@ -242,7 +240,9 @@ export function conferirLugar(caderno: Caderno, texto: string) {
 	if (nomes.length === 0) return codigos;
 	// o nome vem de fonte de fora e pode ter "-", "." ou "(": sem escapar, viraria regex quebrada
 	const formas = [...nomes, ...codigos.map((codigo) => codigo.toLowerCase())].map((forma) => forma.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&"));
-	const foiDito = caderno.textosDoUsuario.some((pedido) => formas.some((forma) => new RegExp(`\\b${forma}\\b`).test(semAcento(pedido))));
+	// "moro em Recife" guardado vale como origem dita; para a data e para o "só diretos" não vale (ver o Caderno)
+	const textos = [...caderno.textosDoUsuario, ...(caderno.preferencias ?? [])];
+	const foiDito = textos.some((pedido) => formas.some((forma) => new RegExp(`\\b${forma}\\b`).test(semAcento(pedido))));
 	if (!foiDito) throw new Error(`"${texto}" não aparece no pedido. Não escolha origem nem destino: pergunte.`);
 	return codigos;
 }
@@ -611,7 +611,7 @@ const cancelarMonitoramentoFerramenta = tool(
 );
 
 // ---------- FERRAMENTAS DE PREFERÊNCIAS ----------
-const LIMITE_DE_PREFERENCIAS = 20;
+export const LIMITE_DE_PREFERENCIAS = 20;
 
 const guardarPreferenciaFerramenta = tool(
 	async ({ texto }, config) => {

@@ -1,6 +1,6 @@
 # Takifly
 
-Bot de viagens no Slack (`bot.ts`) com um vigia de preços separado (`watcher.ts`), em TypeScript que o Node 26 roda direto, sem build. O cérebro é um grafo LangGraph em `brain/graph.ts`, com o modelo glm-5.3 na Ollama Cloud e traces no Langfuse.
+Bot de viagens no Slack (`bot.ts`) com um vigia de preços separado (`watcher.ts`), em TypeScript que o Node 26 roda direto, sem build. O cérebro é um grafo LangGraph em `brain/graph.ts`, com dois modelos da Ollama Cloud (`brain/models.ts`: glm-5.3 decide e escreve, glm-5.3-flash chama as ferramentas) e traces no Langfuse.
 
 ## Regras que valem sempre
 

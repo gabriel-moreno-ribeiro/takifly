@@ -105,9 +105,10 @@ no meio dos nós de modelo. Falta isto, e cada item resolve um problema concreto
 
 ## O caminho que um pedido vai percorrer
 
-Hoje o grafo é uma esteira: preparar, orquestrador, especialistas um de cada vez, redator, verificar.
-O alvo é parecido, com três diferenças: as pesquisas vão em paralelo, tem um nó que confere as regras,
-e o grafo pode parar para perguntar.
+Hoje o orquestrador é o centro: preparar, lembrar e contexto arrumam a memória, o orquestrador monta o plano,
+cada especialista trabalha e volta para ele, e com o plano acabado vêm conferir, redator e verificar (a planta
+completa está no cabeçalho de `brain/graph.ts`). O alvo é parecido, com duas diferenças que faltam: as pesquisas
+vão em paralelo, e o grafo pode parar para perguntar.
 
 ```
   Slack
@@ -153,6 +154,61 @@ nenhuma pesquisa nova.
 | ~~42~~ | **meio feito.** O dossiê existe (tabela `dossie` no dados.sqlite, ferramenta `guardar_documentos`), mas por conversa, não por pessoa. O `Store` continua faltando | `Store` |
 | ~~43~~ | **feito.** O nó `conferir` roda entre os especialistas e o redator: `rules/rules.ts` confere visto, passaporte, vacina e menor de idade, por tabela e subtração de data | nenhum, é código |
 | 44+ | Carro, seguro, passeios, roteiro: cada um copia o molde do 40 | nenhum |
+
+### O harness dos agentes (feito em 08/11)
+
+Pedido da pessoa: o orquestrador organiza tudo, os especialistas podem ser modelos mais fracos desde que o
+código em volta segure, e dois agentes novos cuidam da memória e do contexto. Tudo provado com `npm test`,
+que agora roda o grafo inteiro com modelos falsos (`ModeloFalso` em `quality/tests.ts`), sem crédito.
+
+| Item | O que mudou | Onde |
+|---|---|---|
+| H15 | Dois papéis de modelo: o forte (orquestrador e redator) é o glm-5.3 e o barato (especialistas, lembrar, contexto) é o glm-5.3-flash, escolha da pessoa em 08/11. `MODELO_FORTE` e `MODELO_ESPECIALISTA` trocam um só; `MODELO` troca os dois | `brain/models.ts`, `modelos` em `brain/graph.ts` |
+| F26 | "pronto" só vale se `terminou()` confirmar que uma ferramenta da tarefa respondeu sem erro neste pedido. Se nem tentou, volta com um bilhete; se tentou e a ferramenta recusou ("só até 9 pessoas: pergunte"), ninguém insiste | `terminou`, `comoVoltou` em `brain/graph.ts` |
+| H16 | Todo especialista volta ao orquestrador. Quem terminou (ou teve a ferramenta recusando) só libera o próximo, sem chamada de modelo; quem voltou dizendo que faltou algo faz o orquestrador refazer o plano, até 2 vezes por pedido. Ninguém trabalha uma terceira vez, e quem já resolveu não é chamado de novo | `noOrquestrador`, campos `feitos` e `replanos` |
+| H17 | Agente de contexto: assim que uma mensagem sai da janela de 40 sem estar no resumo, o modelo barato resume as que saíram e as 20 seguintes (nada fica no buraco), e o código tira do resumo valor, horário, duração, link e documento | `noContexto`, `resumoLimpo` |
+| H18 | Agente de memória, no fim do pedido: com pista em primeira pessoa ("moro", "prefiro", "sempre viajo") e sem o especialista `memoria` no pedido (senão ficariam duas cópias), o modelo barato propõe fatos. O código só guarda o que começa com a forma da pista ("mora" só com "moro"), usa só palavras da pessoa, não tem número, valor nem assunto sensível, e não repete. Documento continua só com o especialista `memoria` | `noLembrar`, `fatosParaGuardar` |
+
+Revisão independente em 08/11 (um agente que não sabia das minhas conclusões) achou 10 problemas nesta primeira
+versão; os 10 foram consertados, cada um com o seu teste. O mais grave: as preferências entravam na mesma lista
+que a trava da data inventada lê, e "mora em Natal" soltava qualquer data. Agora elas valem só para o lugar.
+
+O que ainda não foi medido: a prova (`quality/exam.ts`) com um modelo barato de verdade nos especialistas.
+Gasta crédito, então é a pessoa que decide quando rodar.
+
+### Workflow ou agente: o que é o quê neste bot (decidido em 08/11)
+
+**Workflow + IA**: o código decide o caminho, e o modelo entra em pontos fixos para fazer uma coisa só
+(classificar, extrair campos, escrever um texto). O número de chamadas é conhecido antes de rodar.
+**Agente**: o modelo decide o próximo passo olhando o resultado do anterior, num laço com ferramentas.
+Precisa de limites, condição de parada e conferência em volta, porque ninguém sabe quantas vezes ele vai rodar.
+
+Um modelo fraco erra menos preenchendo um formulário do que planejando. Então a regra é: **workflow por padrão;
+agente só onde o próximo passo depende de verdade do resultado anterior.**
+
+| Peça | Hoje | Pode ser | Por quê |
+|---|---|---|---|
+| preparar, conferir, situacao, verificar, emergencia, planilha | código | código | nenhuma decisão difusa |
+| vigia de preços (`brain/price-watch.ts`) | workflow sem IA | igual | checar, comparar, avisar: tudo é regra |
+| orquestrador | workflow + IA (roteador, refaz o plano até 2 vezes) | igual | classifica o pedido; o laço é curto e o código o segura |
+| redator → verificar → redator | workflow + IA (escreve, o código avalia, reescreve até 2 vezes) | igual | o avaliador é código, nunca um segundo modelo |
+| contexto, lembrar | workflow + IA | igual | uma chamada em ponto fixo, código filtra a saída |
+| documento em PDF (`brain/document.ts`, F06) | workflow + IA | igual | uma seção por vez, a partir de um roteiro fixo |
+| especialista memoria | agente (até 6 passos) | **workflow**: o modelo extrai `{guardar, apagar, documentos}` e o código grava | a tarefa é um formulário; "esquece onde moro" o código resolve casando o texto |
+| especialista monitor | agente | **workflow**: extrair rota, datas e preço-alvo; o código cria, lista ou cancela | idem |
+| especialista pesquisador, pedido fechado ("GRU→LIS 12/12, volta 20/12") | agente | **workflow**: extrair os trechos, o código confere se cada um está completo (F13), pergunta o que falta (`interrupt`) e busca em paralelo (`Send`, F15) | o modelo não precisa decidir nada depois de extrair; e é onde o bot gasta mais chamadas hoje |
+| especialista pesquisador, pedido aberto ("algo barato para a Europa em dezembro") | agente | **agente** | a próxima busca depende do que a anterior trouxe |
+| especialista analista, pergunta simples ("o mais rápido?", "quanto dá ida e volta?") | agente | workflow: roteador escolhe uma ferramenta | uma chamada de ferramenta resolve |
+| especialista analista, pergunta encadeada ("dos diretos, qual compensa mais somando ida e volta?") | agente | **agente** | precisa filtrar, olhar, e só então somar |
+| guia de viagem (F08, "como saio do aeroporto?") | não existe | workflow + IA | buscar a seção do guia e escrever: dois passos fixos |
+
+O que fica agente de verdade: a pesquisa exploratória e a análise encadeada. Todo o resto cabe num workflow,
+e cada especialista que virar workflow deixa de precisar de `terminou()`, bilhete de "pronto sem fazer" e
+replano: o modelo nunca decide se age, só preenche. O harness de 08/11 continua valendo para os dois agentes.
+
+Limite da Ollama Cloud que pesa aqui: ela não aplica JSON schema e ignora `tool_choice`, então "preencher o
+formulário" é oferecer uma ferramenta só e pedir que o modelo a chame (`method: "functionCalling"`, com
+`retryPolicy`). Com o glm-5.3 isso acertou 4 de 4 em 03/11; com o glm-5.3-flash a prova ainda vai dizer.
 
 ## De onde vem cada dado real
 
