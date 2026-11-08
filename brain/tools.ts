@@ -23,6 +23,9 @@ export type Caderno = {
 	novos: Voo[];                // o que ainda não foi para uma planilha
 	buscas: string[];            // as buscas feitas neste pedido
 	textosDoUsuario: string[];   // o que a pessoa escreveu: serve para conferir se a data foi mesmo dita
+	// as preferências guardadas, separadas: só a trava do lugar as usa. Misturadas aos textos, "mora em Natal"
+	// contava como a data "Natal" e soltava qualquer data, e o .at(-1) lia a preferência no lugar da última mensagem
+	preferencias?: string[];
 	conversa: string;            // de quem são os monitoramentos e as preferências
 };
 
@@ -242,7 +245,9 @@ export function conferirLugar(caderno: Caderno, texto: string) {
 	if (nomes.length === 0) return codigos;
 	// o nome vem de fonte de fora e pode ter "-", "." ou "(": sem escapar, viraria regex quebrada
 	const formas = [...nomes, ...codigos.map((codigo) => codigo.toLowerCase())].map((forma) => forma.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&"));
-	const foiDito = caderno.textosDoUsuario.some((pedido) => formas.some((forma) => new RegExp(`\\b${forma}\\b`).test(semAcento(pedido))));
+	// "moro em Recife" guardado vale como origem dita; para a data e para o "só diretos" não vale (ver o Caderno)
+	const textos = [...caderno.textosDoUsuario, ...(caderno.preferencias ?? [])];
+	const foiDito = textos.some((pedido) => formas.some((forma) => new RegExp(`\\b${forma}\\b`).test(semAcento(pedido))));
 	if (!foiDito) throw new Error(`"${texto}" não aparece no pedido. Não escolha origem nem destino: pergunte.`);
 	return codigos;
 }
@@ -611,7 +616,7 @@ const cancelarMonitoramentoFerramenta = tool(
 );
 
 // ---------- FERRAMENTAS DE PREFERÊNCIAS ----------
-const LIMITE_DE_PREFERENCIAS = 20;
+export const LIMITE_DE_PREFERENCIAS = 20;
 
 const guardarPreferenciaFerramenta = tool(
 	async ({ texto }, config) => {

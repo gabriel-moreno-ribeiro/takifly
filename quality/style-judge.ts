@@ -23,6 +23,8 @@ import { tool } from "@langchain/core/tools";
 import { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 
+import { rotuloDosModelos } from "../brain/models.ts";
+
 process.loadEnvFile(import.meta.dirname + "/../.env");
 const { anotar, enviarRastreio } = await import("../brain/tracing.ts");
 
@@ -139,7 +141,8 @@ if (import.meta.main) {
 		process.exit(0);
 	}
 
-	const ARQUIVO = process.argv[2] ?? `${import.meta.dirname}/../results/${(process.env.MODELO ?? "glm-5.3").replaceAll(":", "-")}.jsonl`;
+	// o mesmo nome que a prova grava
+	const ARQUIVO = process.argv[2] ?? `${import.meta.dirname}/../results/${rotuloDosModelos().replaceAll(":", "-")}.jsonl`;
 	const SAIDA = ARQUIVO.replace(/\.jsonl$/, ".estilo.jsonl");
 	const lerLinhas = async (caminho: string) => (await readFile(caminho, "utf8").catch(() => "")).split("\n").filter(Boolean).map((linha) => JSON.parse(linha));
 

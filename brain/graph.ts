@@ -2,44 +2,60 @@
 //
 // O caminho do grafo:
 //
-//   START → preparar → orquestrador → especialistas do plano, um de cada vez → conferir → redator → verificar
-//                                   → plano vazio ("oi", "tudo bem?") → situacao → redator → verificar
+//   START → preparar → contexto → orquestrador ⇄ especialistas do plano, um de cada vez
+//                                 orquestrador → plano acabou → conferir → redator → verificar
+//                                              → ninguém trabalhou ("oi", "tudo bem?") → situacao → redator → verificar
 //
+//   contexto (agente de contexto): quando 20 mensagens saíram da janela de 40, o modelo barato atualiza o resumo
+//     e resumoLimpo() tira preço, horário e link. O resumo vai nas instruções do orquestrador, especialistas e redator
 //   especialistas (memoria, monitor, pesquisador, analista): cada um repete "modelo ⇄ ferramentas" até terminar a sua tarefa
+//     e volta ao orquestrador. "pronto" só vale se terminou() confirmar no código que uma ferramenta da tarefa respondeu.
+//   orquestrador: chama o modelo no começo do pedido e quando alguém volta sem terminar (refaz o plano, até 2 vezes);
+//     quem volta tendo terminado só libera o próximo do plano, sem chamada de modelo
 //   conferir: código, sem IA. Vê visto, passaporte, vacina e menor de idade, e deixa o problema como recado
 //   situacao: código, sem IA. Junta o que está em andamento (monitoramentos, pesquisas recentes) para o redator
-//   verificar → aprovou → planilha → END
+//   verificar → aprovou → planilha → lembrar → END
 //             → recusou → volta para redator (até 2 vezes)
-//             → recusou de novo → emergencia → planilha → END
+//             → recusou de novo → emergencia → planilha → lembrar → END
+//   lembrar (agente de memória): com pista na mensagem ("moro", "prefiro") e sem o especialista memoria no pedido,
+//     o modelo barato propõe fatos que duram e fatosParaGuardar() decide o que entra nas preferências
 //
-// Usam IA: orquestrador, especialistas e redator. O resto é código.
+// Usam IA: orquestrador e redator (modelo forte); especialistas, lembrar e contexto (modelo barato). O resto é código.
 //
 // Para perguntar pelo terminal:   node brain/graph.ts "voos de GRU para LIS em 12/12"
 // Para gerar o desenho:           node brain/graph.ts       (depois: open brain/graph.html)
 
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { AIMessage, type BaseMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { Annotation, END, type LangGraphRunnableConfig, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { ChatOpenAI } from "@langchain/openai";
 
-import { AGENTES, instrucoesDoOrquestrador, instrucoesDoRedator, type NomeDoAgente, Plano, planoValido } from "./agents.ts";
-import { type Dossie, lerDossie, listarMonitoramentos, listarPreferencias } from "../storage/database.ts";
-import { type Caderno, conferirNoRegistro, descreverMonitoramento, descreverVoo, limparArgumentos, resumirVoos, servicos } from "./tools.ts";
+import { AGENTES, INSTRUCOES_DO_RESUMO, instrucoesDaMemoria, instrucoesDoOrquestrador, instrucoesDoRedator, Lembrete, type NomeDoAgente, Plano, planoValido } from "./agents.ts";
+import { apagarPreferencia, type Dossie, guardarPreferencia, lerDossie, listarMonitoramentos, listarPreferencias } from "../storage/database.ts";
+import { type Caderno, conferirNoRegistro, descreverMonitoramento, descreverVoo, LIMITE_DE_PREFERENCIAS, limparArgumentos, resumirVoos, servicos } from "./tools.ts";
+import { semAcento } from "../rules/airports.ts";
 import { conferirViagem, paisDoAeroporto, type Trecho, type Viagem } from "../rules/rules.ts";
 import { anotar, rastrear } from "./tracing.ts";
+import { nomesDosModelos, rotuloDosModelos } from "./models.ts";
 import { arrumarParaSlack, escreveuChamada, prometeuSemFazer, verificarResposta } from "./checker.ts";
 import { REGRA_DO_CUSTO_BENEFICIO, type Voo } from "../sources/flights.ts";
 
 // ---------- CHAVES ----------
-process.loadEnvFile(import.meta.dirname + "/../.env");
+// sem .env (worktree nova, CI), as chaves vêm do ambiente: os testes não precisam delas
+if (existsSync(import.meta.dirname + "/../.env")) process.loadEnvFile(import.meta.dirname + "/../.env");
 
 // ---------- LIMITES ----------
 const PASSOS_POR_AGENTE = 6;      // quantas vezes um especialista pode ser chamado em um pedido
 const PASSOS_POR_PEDIDO = 14;     // quantas vezes os especialistas, somados, podem ser chamados em um pedido
 const LIMITE_DE_TENTATIVAS = 2;   // quantas respostas recusadas o redator pode corrigir
+const LIMITE_DE_REPLANOS = 2;     // quantas vezes o orquestrador pode refazer o plano num pedido, quando alguém volta sem terminar
+const JANELA = 40;                // quantas mensagens recentes vão para os modelos
+const LOTE_DO_RESUMO = 20;        // quantas mensagens precisam sair da janela para o agente de contexto resumir de novo
 const VALIDADE_DOS_PRECOS = 6 * 60 * 60 * 1000;    // 6 horas: depois disso, preço pesquisado não vale mais
 
 // ---------- ESTADO ----------
@@ -62,22 +78,30 @@ const Estado = Annotation.Root({
 	tentativas: campo(0),                // quantas respostas o verificador já recusou neste pedido
 	correcao: campo(""),                 // o bilhete para o próximo modelo. Fica fora da conversa, então não suja a memória.
 	convidou: campo(false),              // já convidou a pessoa a contar os documentos: o convite sai uma vez por conversa
+	feitos: campo<string[]>([]),         // cada especialista que voltou ao orquestrador neste pedido: "pesquisador: terminou" ou o que faltou
+	replanos: campo(0),                  // quantas vezes o orquestrador refez o plano neste pedido
+	resumo: campo(""),                   // o que o agente de contexto guardou das mensagens que já saíram da janela (vale para a conversa toda)
+	resumoAte: campo(0),                 // até que mensagem o resumo já cobre
 });
 
-// ---------- MODELO ----------
-// a Ollama Cloud entende o mesmo formato da OpenAI, então usamos o ChatOpenAI apontando para ela
-const NOME_DO_MODELO = process.env.MODELO ?? "glm-5.3";
-const modelo = new ChatOpenAI({
-	model: NOME_DO_MODELO,
-	apiKey: process.env.OLLAMA_API_KEY,
-	configuration: { baseURL: "https://ollama.com/v1" },
-	timeout: 120_000,
-});
+// ---------- MODELOS ----------
+// quem faz cada papel, e por quê, está em models.ts.
+// A Ollama Cloud entende o mesmo formato da OpenAI, então usamos o ChatOpenAI apontando para ela
+function criarModelo(nome: string) {
+	return new ChatOpenAI({ model: nome, apiKey: process.env.OLLAMA_API_KEY, configuration: { baseURL: "https://ollama.com/v1" }, timeout: 120_000 });
+}
+
+// um objeto, e não duas constantes: os testes trocam os dois por modelos falsos, como fazem com servicos.buscarVoos
+const nomes = nomesDosModelos();
+export const modelos: { forte: BaseChatModel; especialista: BaseChatModel } = {
+	forte: criarModelo(nomes.forte),
+	especialista: criarModelo(nomes.especialista),
+};
 
 // ---------- HISTÓRICO ----------
 // a conversa fica guardada para sempre, mas só mandamos as mensagens recentes (cada carta custa dinheiro).
 // O corte começa numa mensagem do usuário: uma resposta de ferramenta sem o pedido dela daria erro no modelo.
-export function cortarHistorico(mensagens: BaseMessage[], limite = 40) {
+export function cortarHistorico(mensagens: BaseMessage[], limite = JANELA) {
 	const ehDoUsuario = (mensagem: BaseMessage) => mensagem.getType() === "human";
 	let inicio = mensagens.findIndex((mensagem, i) => i >= mensagens.length - limite && ehDoUsuario(mensagem));
 	if (inicio === -1) inicio = mensagens.findLastIndex(ehDoUsuario);    // uma única rodada maior que o limite
@@ -126,22 +150,157 @@ function noPreparar(estado: typeof Estado.State) {
 		tentativas: 0,
 		correcao: "",
 		buscas: [],
+		feitos: [],
+		replanos: 0,
 		voos: velhos ? [] : estado.voos,
 		novos: velhos ? [] : estado.novos,
 	};
 }
 
+// ---------- NÓ: CONTEXTO (o agente de contexto) ----------
+// Só as últimas 40 mensagens vão para os modelos, e cada busca gasta 3 ou 4 delas com ferramenta: o bot lembrava
+// de uns 5 pedidos. Assim que uma mensagem sai da janela sem estar no resumo, o modelo barato junta o resumo antigo
+// com as perguntas e respostas que saíram e com as 20 seguintes, que vão sair logo (sem passar do pedido de agora).
+// Nada fica no buraco entre o resumo e a janela, e a próxima chamada só vem depois de mais 20 mensagens:
+// uma chamada barata a cada vários pedidos, nunca uma por mensagem. O código limpa o que o modelo escreveu.
+export async function noContexto(estado: typeof Estado.State) {
+	const inicioDaJanela = estado.messages.length - cortarHistorico(estado.messages).length;
+	if (inicioDaJanela <= estado.resumoAte) return {};
+
+	// uma conversa de antes deste nó existir tem centenas de mensagens fora da janela: o primeiro resumo lê só as 60
+	// mais recentes delas, para a carta não ficar enorme. O que é mais antigo que isso fica esquecido.
+	const desde = Math.max(estado.resumoAte, inicioDaJanela - 3 * LOTE_DO_RESUMO);
+	const ate = Math.min(inicioDaJanela + LOTE_DO_RESUMO, estado.messages.findLastIndex((mensagem) => mensagem.getType() === "human"));
+	const saindo = estado.messages.slice(desde, ate)
+		.filter((mensagem) => mensagem.getType() === "human" || (mensagem.getType() === "ai" && !(mensagem as AIMessage).tool_calls?.length))
+		.map((mensagem) => `${mensagem.getType() === "human" ? "Pessoa" : "Bot"}: ${mensagem.text.slice(0, 500)}`);
+	try {
+		const resposta = await modelos.especialista.invoke([
+			new SystemMessage(INSTRUCOES_DO_RESUMO),
+			new HumanMessage(`Resumo de antes: ${estado.resumo || "nenhum"}\n\nConversa que vai sair da memória:\n${saindo.join("\n")}`),
+		]);
+		return { resumo: resumoLimpo(resposta.text), resumoAte: ate };
+	} catch (erro: any) {
+		// sem resumo o bot responde igual, só esquece mais cedo: o pedido nunca para por causa dele
+		console.log(`[contexto] não resumiu: ${erro.message}`);
+		return {};
+	}
+}
+
+// o resumo é texto de modelo e não pode virar "fato": frase com valor (em qualquer moeda), horário, duração, link
+// ou documento sai inteira. Documento mora no dossiê, não em texto que vai para todos os prompts e para o Langfuse.
+const FORA_DO_RESUMO = /\$|€|£|\b(reais|real|euros?|dolar|dolares|libras?)\b|\d{1,3}(?:\.\d{3})+|\d{1,2}\s*(?::|h)\s*\d{2}|\d+\s*(?:horas?|min)\b|https?:\/\/|passaporte|nascimento|nasceu|vacina|visto|\bcpf\b|\brg\b/i;
+
+export function resumoLimpo(texto: string) {
+	const frases = texto.split(/(?<=[.!?])\s+|\n+/);
+	return frases.filter((frase) => !FORA_DO_RESUMO.test(semAcento(frase))).join(" ").trim().slice(0, 800);
+}
+
+// ---------- NÓ: LEMBRAR (o agente de memória) ----------
+// O especialista memoria só guarda quando a pessoa pede ("lembra disso"). Este nó pega o que ela conta de passagem
+// ("moro em Recife, quero ir a Lisboa"). Sem pista na mensagem, não gasta chamada; com pista, o modelo barato
+// propõe e o código decide o que entra. O que for guardado aparece nas próximas mensagens como "Preferências guardadas".
+// Roda no fim do pedido: se o especialista memoria trabalhou nele, a mensagem já foi cuidada, e guardar de novo
+// deixaria duas cópias (um "esquece isso" depois apagaria só uma).
+// Cada forma de fato e a pista em primeira pessoa que precisa estar na mensagem: "mora" só com "moro".
+// Assim "minha sogra mora em Portugal" não vira um fato sobre a pessoa, e "nunca fui a Lisboa" nem chama o modelo.
+const FORMAS_DE_FATO: [fato: RegExp, pista: RegExp][] = [
+	[/^mora\b/, /\b(moro|morando)\b/],
+	[/^vive\b/, /\bvivo\b/],
+	[/^(e|sai) de\b/, /\b(sou|saio) de\b/],
+	[/^prefere\b/, /\bprefiro\b/],
+	[/^evita\b/, /\bevito\b/],
+	[/^nao gosta\b/, /\bnao gosto\b/],
+	[/^gosta\b/, /\bgosto\b/],
+	[/^(odeia|detesta)\b/, /\b(odeio|detesto)\b/],
+	[/^costuma\b/, /\bcostumo\b/],
+	[/^viaja com\b/, /\bviajo com\b/],
+	[/^(sempre|nunca) \w+/, /\b(sempre|nunca) (viajo|voo|prefiro|saio|pego|escolho|compro|sento|vou)\b/],
+];
+const PEDIU_PARA_LEMBRAR = /\b(lembr|guard|anot|memoriz|esquec|apag)/;    // pedido explícito é do especialista memoria
+// saúde, religião e afins só são guardados quando a pessoa pede, pelo especialista memoria: nunca de passagem
+const ASSUNTO_SENSIVEL = /diabet|insulin|doen[cç]|remedio|medicament|gravid|gestante|deficien|cadeirante|mobilidade|autis|religi|igreja|judeu|judia|muculman|orientacao sexual|hiv|cancer|depress|ansiedade|alergi|vegan|vegetarian/;
+
+export async function noLembrar(estado: typeof Estado.State, config: LangGraphRunnableConfig) {
+	if (estado.feitos.some((feito) => feito.startsWith("memoria:"))) return {};
+	const mensagem = estado.messages.findLast((mensagem) => mensagem.getType() === "human")?.text ?? "";
+	const normal = semAcento(mensagem).toLowerCase();
+	const temPista = FORMAS_DE_FATO.some(([, pista]) => pista.test(normal));
+	if (!temPista || PEDIU_PARA_LEMBRAR.test(normal) || ASSUNTO_SENSIVEL.test(normal)) return {};
+
+	const conversa = conversaDe(config);
+	const guardadas = listarPreferencias(conversa);
+	try {
+		const memoria = modelos.especialista.withStructuredOutput(Lembrete, { name: "lembrar", method: "functionCalling" });
+		const proposta = await memoria.invoke([new SystemMessage(instrucoesDaMemoria(guardadas.map((preferencia) => preferencia.texto))), new HumanMessage(mensagem)]);
+		const { novos, velhos } = fatosParaGuardar(proposta, guardadas, mensagem);
+		for (const velho of velhos) apagarPreferencia(conversa, velho.id);
+		for (const fato of novos) guardarPreferencia(conversa, fato);
+		if (novos.length > 0) console.log(`[lembrar] guardou: ${novos.join("; ")}${velhos.length > 0 ? ` (no lugar de: ${velhos.map((velho) => velho.texto).join("; ")})` : ""}`);
+	} catch (erro: any) {
+		// sem memória nova o pedido segue igual: este nó nunca derruba uma resposta
+		console.log(`[lembrar] não guardou: ${erro.message}`);
+	}
+	return {};
+}
+
+// A conferência do agente de memória: o modelo propõe, o código decide. Entra o fato que:
+//   - começa com uma forma de FORMAS_DE_FATO, e a mensagem tem a pista dela ("vai a Lisboa" é o pedido de agora, não um fato);
+//   - tirando o verbo, só tem palavras que a pessoa escreveu (nada de completar com o que ela não disse);
+//   - não tem número nem valor, nem assunto sensível, e cabe em 120 letras;
+//   - não repete o que já está guardado.
+// Trocar só vale junto com um fato novo e só o que está guardado com o mesmo texto: apagar sozinho continua
+// com o especialista memoria, quando a pessoa pede.
+export function fatosParaGuardar(proposta: { guardar: string[]; trocar: string[] }, guardadas: { id: number; texto: string }[], mensagem: string) {
+	const normal = (texto: string) => semAcento(texto).toLowerCase().trim();
+	// palavras de 4 letras ou mais, sem o "s" do plural: "diretos" e "direto" contam como a mesma
+	const palavras = (texto: string) => (normal(texto).match(/[a-z]+/g) ?? []).map((palavra) => palavra.replace(/s$/, "")).filter((palavra) => palavra.length >= 4);
+	const daPessoa = new Set(palavras(mensagem));
+	const jaTem = new Set(guardadas.map((preferencia) => normal(preferencia.texto)));
+	const novos: string[] = [];
+	for (const fato of proposta.guardar.map((texto) => texto.trim())) {
+		const forma = FORMAS_DE_FATO.find(([doFato]) => doFato.test(normal(fato)));
+		const resto = forma ? palavras(normal(fato).replace(forma[0], "")) : [];
+		const ancorado = forma !== undefined && forma[1].test(normal(mensagem)) && resto.length > 0 && resto.every((palavra) => daPessoa.has(palavra));
+		const temValor = /\d|\b(reais|real|euros?|dolar|dolares)\b/.test(normal(fato));
+		if (fato.length > 120 || temValor || ASSUNTO_SENSIVEL.test(normal(fato)) || !ancorado || jaTem.has(normal(fato))) continue;
+		jaTem.add(normal(fato));
+		novos.push(fato);
+	}
+	const velhos = novos.length > 0 ? guardadas.filter((preferencia) => proposta.trocar.some((texto) => normal(texto) === normal(preferencia.texto))) : [];
+	const vagas = LIMITE_DE_PREFERENCIAS - (guardadas.length - velhos.length);
+	return { novos: novos.slice(0, Math.max(0, vagas)), velhos };
+}
+
+// o resumo entra nas instruções, nunca na conversa: assim não conta como fala da pessoa nem como fato para o verificador
+function comResumo(instrucoes: string, estado: typeof Estado.State) {
+	if (!estado.resumo) return instrucoes;
+	return `${instrucoes}\n\nResumo da conversa mais antiga (não traz preço nem horário, e para pesquisar a data precisa estar no pedido): ${estado.resumo}`;
+}
+
 // ---------- NÓ: ORQUESTRADOR ----------
-// decide uma vez só quem trabalha, e nada aqui entra na conversa.
+// O centro do pedido: monta o plano, e todo especialista volta para cá quando acaba. Nada daqui entra na conversa.
+// O modelo só é chamado quando há o que decidir: no começo do pedido e quando alguém volta sem terminar.
+// Quem volta com a tarefa cumprida (terminou, conferido por código) só libera o próximo do plano, de graça.
 // method "functionCalling": na Ollama Cloud o glm-5.3 ignora o "jsonSchema" (o padrão) e devolve lista solta ou texto;
 // no teste de 03/11 foram 4 de 4 certos assim, contra 1 de 4 (e ~115 s cada) com o padrão.
-const orquestrador = modelo.withStructuredOutput(Plano, { name: "definir_plano", method: "functionCalling" });
-
 async function noOrquestrador(estado: typeof Estado.State) {
-	const carta = [new SystemMessage(instrucoesDoOrquestrador(estado.voos.length > 0)), ...historicoLimpo(estado.messages)];
+	const ultimo = estado.feitos.at(-1);
+	if (ultimo && VOLTOU_RESOLVIDO.test(ultimo)) return {};
+	// voltou sem terminar, mas o pedido já gastou o que podia: segue para o conferir com o que tem
+	if (ultimo && (estado.replanos >= LIMITE_DE_REPLANOS || estado.passos >= PASSOS_POR_PEDIDO)) return { plano: [] };
+
+	const carta = [new SystemMessage(comResumo(instrucoesDoOrquestrador(estado.voos.length > 0, estado.feitos), estado)), ...historicoLimpo(estado.messages)];
+	const orquestrador = modelos.forte.withStructuredOutput(Plano, { name: "definir_plano", method: "functionCalling" });
 	const resposta = await orquestrador.invoke(carta);
-	// o zod já garantiu o formato; o código ainda tira nomes repetidos e põe na ordem certa
-	return { plano: planoValido(resposta.agentes), idioma: resposta.idioma };
+	// o zod já garantiu o formato; o código tira nome repetido e põe na ordem certa, não chama de novo quem já
+	// resolveu a sua parte e não deixa ninguém trabalhar uma terceira vez
+	const vezes = (nome: string) => estado.feitos.filter((feito) => feito.startsWith(nome + ":")).length;
+	const resolveu = (nome: string) => estado.feitos.some((feito) => feito.startsWith(nome + ":") && VOLTOU_RESOLVIDO.test(feito));
+	const plano = planoValido(resposta.agentes).filter((nome) => vezes(nome) < 2 && !resolveu(nome));
+	if (!ultimo) return { plano, idioma: resposta.idioma };
+	console.log(`[orquestrador] refez o plano depois de "${ultimo}": ${plano.join(", ") || "ninguém, vai responder"}`);
+	return { plano, replanos: estado.replanos + 1 };
 }
 
 // as mensagens deste pedido: da última mensagem do usuário em diante
@@ -172,29 +331,67 @@ function recadoConferido(nome: string, recado: string, estado: typeof Estado.Sta
 	return "não terminou: a nota deste especialista trouxe dado que não veio de ferramenta, e foi descartada";
 }
 
+// ---------- A TAREFA CUMPRIDA ----------
+// dizer "pronto" não basta: o código confere se, neste pedido, uma ferramenta da tarefa do especialista
+// respondeu sem erro. Listar aeroportos ou ver o dia da semana ajuda, mas não é pesquisar.
+const FERRAMENTAS_DA_TAREFA: Partial<Record<NomeDoAgente, string[]>> = { pesquisador: ["buscar_voos", "buscar_hoteis"] };
+
+// as respostas que as ferramentas da tarefa deste especialista deram neste pedido
+function respostasDaTarefa(nome: NomeDoAgente, mensagens: BaseMessage[]) {
+	const daTarefa = FERRAMENTAS_DA_TAREFA[nome] ?? AGENTES[nome].ferramentas.map((ferramenta) => ferramenta.name);
+	const pedido = mensagensDoPedido(mensagens);
+	const chamadas = new Set(pedido.flatMap((mensagem) => ((mensagem as AIMessage).tool_calls ?? []).filter((chamada) => daTarefa.includes(chamada.name)).map((chamada) => chamada.id)));
+	return pedido.filter((mensagem) => mensagem.getType() === "tool" && chamadas.has((mensagem as ToolMessage).tool_call_id));
+}
+
+export function terminou(nome: NomeDoAgente, mensagens: BaseMessage[]) {
+	return respostasDaTarefa(nome, mensagens).some((resposta) => !resposta.text.startsWith("Erro:"));
+}
+
+// Como o especialista voltou, decidido pelo código e não pelo que ele escreveu:
+//   "terminou": uma ferramenta da tarefa deu resultado. O orquestrador só libera o próximo.
+//   "a ferramenta recusou": tentou, e todas deram Erro ("só pesquiso até 9 pessoas: pergunte"). O Erro já diz
+//     ao redator o que perguntar, então ninguém insiste e o orquestrador também só libera o próximo.
+//   qualquer outra coisa (o "faltou a data" que ele escreveu): o orquestrador refaz o plano.
+function comoVoltou(nome: NomeDoAgente, estado: typeof Estado.State, recado: string) {
+	const respostas = respostasDaTarefa(nome, estado.messages);
+	if (respostas.some((resposta) => !resposta.text.startsWith("Erro:"))) return "terminou";
+	if (respostas.length > 0) return "a ferramenta recusou";
+	return recado || "não fez nada";
+}
+const VOLTOU_RESOLVIDO = /: (terminou|a ferramenta recusou)$/;
+
+// "Pronto!", "*pronto*" e "Done." também: o modelo escreve de vários jeitos
+const ehPronto = (texto: string) => /^[\s*_.!]*(pronto|feito|done)[\s*_.!]*$/i.test(texto);
+
 // ---------- NÓS: ESPECIALISTAS ----------
-// todo especialista funciona igual: lê o pedido, chama as suas ferramentas e, quando termina, deixa um recado e sai do plano
+// todo especialista funciona igual: lê o pedido, chama as suas ferramentas e, quando termina, deixa um recado,
+// sai do plano e volta ao orquestrador contando como foi (comoVoltou)
 function criarEspecialista(nome: NomeDoAgente) {
 	const { ferramentas, instrucoes } = AGENTES[nome];
 
 	return async (estado: typeof Estado.State, config: LangGraphRunnableConfig) => {
 		const sair = (recado: string) => {
-			const conferido = recado && !/^pronto\.?$/i.test(recado.trim()) ? recadoConferido(nome, recado, estado) : "";
+			const conferido = recado.trim() && !ehPronto(recado) ? recadoConferido(nome, recado, estado) : "";
+			const situacao = comoVoltou(nome, estado, conferido);
+			// terminou numa segunda vez: o "faltou" da primeira já não vale, e o redator não pode perguntar o que já foi resolvido
+			const anteriores = situacao === "terminou" ? estado.recados.filter((anterior) => !anterior.startsWith(nome + ":")) : estado.recados;
 			return {
 				plano: estado.plano.slice(1),
 				passosDoAgente: 0,
 				correcao: "",
-				recados: conferido ? [...estado.recados, `${nome}: ${conferido}`] : estado.recados,
+				recados: conferido ? [...anteriores, `${nome}: ${conferido}`] : anteriores,
+				feitos: [...estado.feitos, `${nome}: ${situacao}`],
 			};
 		};
 		if (estado.passosDoAgente >= PASSOS_POR_AGENTE || estado.passos >= PASSOS_POR_PEDIDO) return sair("não terminou: chegou ao limite de passos");
 
 		const preferencias = preferenciasDe(config);
 		const guardadas = preferencias.length > 0 ? `\nPreferências guardadas: ${preferencias.join("; ")}.` : "";
-		const carta: BaseMessage[] = [new SystemMessage(instrucoes() + guardadas), ...historicoLimpo(estado.messages)];
+		const carta: BaseMessage[] = [new SystemMessage(comResumo(instrucoes() + guardadas, estado)), ...historicoLimpo(estado.messages)];
 		if (estado.correcao) carta.push(new HumanMessage(estado.correcao));
 
-		const resposta = await modelo.bindTools(ferramentas).invoke(carta);
+		const resposta = await modelos.especialista.bindTools!(ferramentas).invoke(carta);
 		const contagem = { passos: estado.passos + 1, passosDoAgente: estado.passosDoAgente + 1 };
 		if (resposta.tool_calls?.length) return { messages: [comIdNovo(resposta)], ...contagem, correcao: "" };
 
@@ -203,6 +400,12 @@ function criarEspecialista(nome: NomeDoAgente) {
 		if (resposta.invalid_tool_calls?.length || escreveuChamada(texto) || prometeuSemFazer(texto)) {
 			console.log(`[${nome}] não chamou a ferramenta direito: ${texto.slice(0, 100)}`);
 			return { ...contagem, correcao: "Você não chamou a ferramenta do jeito certo. Chame a ferramenta agora, ou escreva o que faltou." };
+		}
+		// "pronto" (ou nada) sem nem ter tentado a tarefa é a mesma promessa vazia, dita de outro jeito: ele volta para fazer.
+		// Se tentou e a ferramenta recusou, não insiste: mandar chamar de novo empurraria o modelo a contornar a regra
+		if ((ehPronto(texto) || !texto.trim()) && respostasDaTarefa(nome, estado.messages).length === 0) {
+			console.log(`[${nome}] disse pronto sem ter feito a tarefa`);
+			return { ...contagem, correcao: "Você escreveu \"pronto\", mas não chamou nenhuma ferramenta da sua tarefa neste pedido. Chame a ferramenta agora, ou escreva em uma frase o que faltou." };
 		}
 		return { ...sair(texto), ...contagem, passosDoAgente: 0 };
 	};
@@ -226,7 +429,8 @@ export async function noFerramentas(estado: typeof Estado.State, config?: LangGr
 		voos: estado.voos,
 		novos: estado.novos,
 		buscas: [...estado.buscas],
-		textosDoUsuario: [...textosDoUsuario(estado.messages), ...preferenciasDe(config)],
+		textosDoUsuario: textosDoUsuario(estado.messages),
+		preferencias: preferenciasDe(config),
 		conversa: conversaDe(config),
 	};
 	const usadas = chamadasDoPedido(estado.messages.slice(0, -1));
@@ -378,9 +582,9 @@ export function noSituacao(estado: typeof Estado.State, config: LangGraphRunnabl
 // ---------- NÓ: REDATOR ----------
 // o único que fala com o usuário. Ele não tem ferramentas: só pode usar o que os outros trouxeram.
 async function noRedator(estado: typeof Estado.State, config: LangGraphRunnableConfig) {
-	const carta: BaseMessage[] = [new SystemMessage(instrucoesDoRedator(estado.idioma, preferenciasDe(config), estado.recados)), ...historicoLimpo(estado.messages)];
+	const carta: BaseMessage[] = [new SystemMessage(comResumo(instrucoesDoRedator(estado.idioma, preferenciasDe(config), estado.recados), estado)), ...historicoLimpo(estado.messages)];
 	if (estado.correcao) carta.push(new HumanMessage(estado.correcao));
-	const resposta = await modelo.invoke(carta);
+	const resposta = await modelos.forte.invoke(carta);
 	return { messages: [comIdNovo(resposta)], correcao: "" };
 }
 
@@ -435,19 +639,22 @@ async function noPlanilha(estado: typeof Estado.State) {
 }
 
 // ---------- ARESTAS CONDICIONAIS ----------
-function proximoDoPlano(estado: typeof Estado.State) {
-	return estado.plano[0] ?? "conferir";    // acabou o plano: as regras da viagem antes de escrever
-}
-
-// plano vazio desde o começo: ninguém pesquisou nada, então não há regra para conferir
+// o plano acabou: as regras da viagem antes de escrever. Se ninguém trabalhou ("oi"), não há regra para conferir,
+// e o redator recebe a situação atual
 function depoisDoOrquestrador(estado: typeof Estado.State) {
-	return estado.plano[0] ?? "situacao";
+	return estado.plano[0] ?? (estado.feitos.length > 0 ? "conferir" : "situacao");
 }
 
-// o especialista pediu ferramenta? Se não, segue o plano (ou ele mesmo de novo, se ainda não saiu do plano)
+// pediu ferramenta: vai rodar. Recebeu bilhete de correção: ele mesmo de novo. Saiu do plano: volta ao orquestrador
 function depoisDoEspecialista(estado: typeof Estado.State) {
 	const ultima = estado.messages.at(-1) as AIMessage;
-	return ultima.tool_calls?.length ? "ferramentas" : proximoDoPlano(estado);
+	if (ultima.tool_calls?.length) return "ferramentas";
+	return estado.correcao ? estado.plano[0] : "orquestrador";
+}
+
+// a resposta da ferramenta volta para quem pediu, que ainda é o primeiro do plano
+function depoisDasFerramentas(estado: typeof Estado.State) {
+	return estado.plano[0] ?? "orquestrador";
 }
 
 function depoisDeVerificar(estado: typeof Estado.State) {
@@ -459,13 +666,16 @@ function depoisDeVerificar(estado: typeof Estado.State) {
 // o SqliteSaver guarda a pasta num arquivo depois de cada nó: é a memória que sobrevive ao Ctrl+C
 const memoria = SqliteSaver.fromConnString(process.env.MEMORIA ?? import.meta.dirname + "/../data/memoria.sqlite");
 
-const CAMINHOS = ["memoria", "monitor", "pesquisador", "analista", "conferir"] as const;
-const CAMINHOS_DO_ESPECIALISTA = ["ferramentas", ...CAMINHOS] as const;
-const CAMINHOS_DO_ORQUESTRADOR = ["memoria", "monitor", "pesquisador", "analista", "situacao"] as const;
+const ESPECIALISTAS = ["memoria", "monitor", "pesquisador", "analista"] as const;
+const CAMINHOS_DO_ORQUESTRADOR = [...ESPECIALISTAS, "conferir", "situacao"] as const;
+const CAMINHOS_DO_ESPECIALISTA = [...ESPECIALISTAS, "ferramentas", "orquestrador"] as const;
+const CAMINHOS_DAS_FERRAMENTAS = [...ESPECIALISTAS, "orquestrador"] as const;
 
 // exportado para o floorplan desenhar a camada de cima a partir do grafo de verdade, não de uma cópia à mão
 export const grafo = new StateGraph(Estado)
 	.addNode("preparar", noPreparar)
+	.addNode("lembrar", noLembrar)
+	.addNode("contexto", noContexto)
 	.addNode("orquestrador", noOrquestrador, { retryPolicy: { maxAttempts: 2 } })    // resposta fora do formato: tenta mais uma vez
 	.addNode("memoria", criarEspecialista("memoria"))
 	.addNode("monitor", criarEspecialista("monitor"))
@@ -479,19 +689,21 @@ export const grafo = new StateGraph(Estado)
 	.addNode("emergencia", noEmergencia)
 	.addNode("planilha", noPlanilha)
 	.addEdge(START, "preparar")
-	.addEdge("preparar", "orquestrador")
+	.addEdge("preparar", "contexto")
+	.addEdge("contexto", "orquestrador")
 	.addConditionalEdges("orquestrador", depoisDoOrquestrador, [...CAMINHOS_DO_ORQUESTRADOR])
 	.addConditionalEdges("memoria", depoisDoEspecialista, [...CAMINHOS_DO_ESPECIALISTA])
 	.addConditionalEdges("monitor", depoisDoEspecialista, [...CAMINHOS_DO_ESPECIALISTA])
 	.addConditionalEdges("pesquisador", depoisDoEspecialista, [...CAMINHOS_DO_ESPECIALISTA])
 	.addConditionalEdges("analista", depoisDoEspecialista, [...CAMINHOS_DO_ESPECIALISTA])
-	.addConditionalEdges("ferramentas", proximoDoPlano, [...CAMINHOS])
+	.addConditionalEdges("ferramentas", depoisDasFerramentas, [...CAMINHOS_DAS_FERRAMENTAS])
 	.addEdge("conferir", "redator")
 	.addEdge("situacao", "redator")
 	.addEdge("redator", "verificar")
 	.addConditionalEdges("verificar", depoisDeVerificar, ["planilha", "redator", "emergencia"])
 	.addEdge("emergencia", "planilha")
-	.addEdge("planilha", END)
+	.addEdge("planilha", "lembrar")
+	.addEdge("lembrar", END)
 	.compile({ checkpointer: memoria });
 
 // ---------- RESPONDER ----------
@@ -507,7 +719,7 @@ function descreverChamada(chamada: { name: string; args: Record<string, any> }) 
 // stream roda o grafo igual ao invoke, mas entrega o resultado de cada nó assim que ele termina.
 // recursionLimit: o freio de mão do LangGraph, bem acima dos nossos limites; só dispara se um limite nosso falhar.
 async function rodar(entrada: { messages: BaseMessage[] } | null, config: { configurable: { thread_id: string } }, avisar: Avisar) {
-	const callbacks = rastrear(config.configurable.thread_id, NOME_DO_MODELO);
+	const callbacks = rastrear(config.configurable.thread_id, rotuloDosModelos());
 	for await (const passo of await grafo.stream(entrada, { ...config, streamMode: "updates", recursionLimit: 60, callbacks })) {
 		// cada passo traz o resultado de um nó; se um especialista pediu ferramentas, conta o que está acontecendo
 		for (const resultado of Object.values(passo) as { messages?: AIMessage[] }[]) {

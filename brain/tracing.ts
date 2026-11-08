@@ -2,12 +2,15 @@
 //
 // Se não houver chaves LANGFUSE_* no .env, nada é enviado e o bot funciona igual.
 
+import { existsSync } from "node:fs";
+
 import { LangfuseClient } from "@langfuse/client";
 import { CallbackHandler } from "@langfuse/langchain";
 import { LangfuseSpanProcessor } from "@langfuse/otel";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 
-process.loadEnvFile(import.meta.dirname + "/../.env");
+// sem .env (worktree nova, CI), as chaves vêm do ambiente: os testes não precisam delas
+if (existsSync(import.meta.dirname + "/../.env")) process.loadEnvFile(import.meta.dirname + "/../.env");
 
 const ligado = Boolean(process.env.LANGFUSE_SECRET_KEY);
 const provedor = new NodeTracerProvider({ spanProcessors: ligado ? [new LangfuseSpanProcessor()] : [] });

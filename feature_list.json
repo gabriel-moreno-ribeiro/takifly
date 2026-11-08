@@ -1,6 +1,6 @@
 {
 	"project": "takifly",
-	"last_updated": "2026-11-05",
+	"last_updated": "2026-11-08",
 	"states": [
 		"not_started",
 		"active",
@@ -133,6 +133,42 @@
 			"state": "not_started",
 			"evidence": "",
 			"notes": "aula 02 (teste de exclusão); gasta crédito para medir"
+		},
+		{
+			"id": "H15",
+			"area": "harness",
+			"behavior": "Orquestrador e redator usam o modelo forte (glm-5.3) e os especialistas o barato (glm-5.3-flash), escolha da pessoa em 08/11; MODELO_FORTE e MODELO_ESPECIALISTA trocam um, MODELO troca os dois; e os testes rodam o grafo inteiro com um modelo falso, sem crédito.",
+			"verification": "grep -q \"MODELO_ESPECIALISTA\" brain/models.ts && grep -q \"O GRAFO INTEIRO\" quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 51b6b8a com mudanças sem commit: Tudo certo!",
+			"notes": "pedido da pessoa em 2026-11-08; docs/lessons-ibm.md (modelo caro só onde muda a resposta). Trocar o modelo de verdade gasta crédito: MODELO_ESPECIALISTA=<nome> node quality/exam.ts"
+		},
+		{
+			"id": "H16",
+			"area": "harness",
+			"behavior": "Os especialistas voltam ao orquestrador. Quem terminou a tarefa segue o plano sem nova chamada de modelo; quem voltou sem terminar faz o orquestrador replanejar, no máximo 2 vezes por pedido; com o plano vazio, o orquestrador manda para o conferir.",
+			"verification": "grep -q \"LIMITE_DE_REPLANOS\" brain/graph.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 51b6b8a com mudanças sem commit: Tudo certo!",
+			"notes": "pedido da pessoa em 2026-11-08; depende de H15 (modelo falso) e F26 (terminou)"
+		},
+		{
+			"id": "H17",
+			"area": "harness",
+			"behavior": "Agente de contexto: quando 20 mensagens saem da janela de 40, um modelo barato resume o que a pessoa contou e pediu, o código tira preço, horário e link do resumo, e o resumo entra nas instruções do orquestrador, dos especialistas e do redator.",
+			"verification": "grep -q \"export async function noContexto\" brain/graph.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 51b6b8a com mudanças sem commit: Tudo certo!",
+			"notes": "pedido da pessoa em 2026-11-08; depende de H15"
+		},
+		{
+			"id": "H18",
+			"area": "harness",
+			"behavior": "Agente de memória: quando a mensagem traz uma pista (moro, prefiro, sempre...), um modelo barato propõe fatos duráveis e o código só guarda os curtos, sem número, ancorados no que a pessoa escreveu e sem repetir; uma preferência só é trocada junto com a nova.",
+			"verification": "grep -q \"export async function noLembrar\" brain/graph.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 51b6b8a com mudanças sem commit: Tudo certo!",
+			"notes": "pedido da pessoa em 2026-11-08; depende de H15. Documentos (passaporte, nascimento, vacina) continuam só com o especialista memoria, quando a pessoa conta"
 		},
 		{
 			"id": "F01",
@@ -364,8 +400,8 @@
 			"area": "brain",
 			"behavior": "O especialista só sai do plano com \"pronto\" se fez o que lhe cabia: o pesquisador precisa ter feito uma busca neste pedido.",
 			"verification": "grep -q \"export function terminou\" brain/graph.ts && node quality/tests.ts",
-			"state": "not_started",
-			"evidence": "",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 51b6b8a com mudanças sem commit: Tudo certo!",
 			"notes": "aula 07; docs/lessons-ibm.md (condição de parada verificável). Hoje criarEspecialista sai por contagem (PASSOS_POR_AGENTE) ou por \"pronto\""
 		},
 		{

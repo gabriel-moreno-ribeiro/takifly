@@ -5,7 +5,8 @@
 //
 // Como rodar (dentro da pasta passagens.ts/, a de cima):
 //   node quality/exam.ts                                  usa o modelo padrão
-//   MODELO=gpt-oss:20b node quality/exam.ts               usa outro modelo
+//   MODELO=gpt-oss:20b node quality/exam.ts               usa outro modelo em tudo (o padrão está em brain/models.ts)
+//   MODELO_ESPECIALISTA=gemma4:31b node quality/exam.ts   outro modelo só nos especialistas (MODELO_FORTE: orquestrador e redator)
 //   node quality/exam.ts cidade                           só os casos com "cidade" no nome
 //   PARTE=2/8 node quality/exam.ts                        só a 2ª de 8 partes (para rodar vários ao mesmo tempo)
 //   CENARIOS=10k AMOSTRA=48 node quality/exam.ts          48 dos 10 mil cenários gerados, espalhados por todas as famílias
@@ -25,6 +26,7 @@ import { semAcento } from "../rules/airports.ts";
 process.env.MEMORIA = ":memory:";
 process.env.DADOS = ":memory:";
 const { responder } = await import("../brain/graph.ts");
+const { rotuloDosModelos } = await import("../brain/models.ts");
 const { servicos } = await import("../brain/tools.ts");
 const { lerDossie, listarMonitoramentos, listarPreferencias } = await import("../storage/database.ts");
 const { anotar, enviarRastreio } = await import("../brain/tracing.ts");
@@ -423,7 +425,9 @@ const nomes = todos.map((caso) => caso.nome);
 if (new Set(nomes).size !== nomes.length) throw new Error("há dois cenários com o mesmo nome");
 
 // ---------- RODAR A PROVA ----------
-const MODELO = process.env.MODELO ?? "glm-5.3";
+// com MODELO_FORTE ou MODELO_ESPECIALISTA, o nome tem os dois ("glm-5.3+glm-5.3-flash"): senão a prova pularia
+// os casos achando que já rodaram com o modelo de antes
+const MODELO = rotuloDosModelos();
 const PASTA = process.env.RESULTADOS ?? import.meta.dirname + "/../results";
 const ARQUIVO = `${PASTA}/${MODELO.replaceAll(":", "-")}${DEZ_MIL ? "-10k" : ""}.jsonl`;
 const TEMPO_MAXIMO = 8 * 60 * 1000;

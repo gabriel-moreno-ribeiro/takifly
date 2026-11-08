@@ -26,7 +26,10 @@
 //
 // Sem as linhas no .env o e-mail fica desligado e o bot roda igual, só avisando pelo Slack.
 
-process.loadEnvFile(import.meta.dirname + "/../.env");
+import { existsSync } from "node:fs";
+
+// sem .env (worktree nova, CI), as chaves vêm do ambiente: os testes não precisam delas
+if (existsSync(import.meta.dirname + "/../.env")) process.loadEnvFile(import.meta.dirname + "/../.env");
 
 // o remetente de teste da Resend: serve sem domínio nenhum, e é por isso que ele é o padrão aqui
 const REMETENTE_DE_TESTE = "Takifly <onboarding@resend.dev>";
