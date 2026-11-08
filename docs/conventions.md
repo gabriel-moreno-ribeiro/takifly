@@ -13,7 +13,7 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-11-04T20:47:43Z }
 - Preço, horário, duração e link só chegam ao Slack depois do `brain/checker.ts`. Nunca troque uma conferência de código por um segundo modelo.
 - Ferramenta nova entra no `REGISTRO` (`brain/tools.ts`) com `ligada: false` e só liga quando a família dela passa na prova.
 - Passo novo do `docs/AGENCIA.md` ganha cenários novos em `quality/scenarios.ts`. Os `novo-*` já foram vistos pelos modelos.
-- Mudou nó, aresta ou campo do estado em `brain/graph.ts` ou `brain/price-watch.ts`: atualize o cabeçalho do arquivo, que é a planta do grafo, e regenere o desenho (`MEMORIA=:memory: node brain/graph.ts` ou `node brain/price-watch.ts --desenho`).
+- Mudou nó, aresta ou campo do estado em `brain/graph.ts` ou `brain/price-watch.ts`: atualize o cabeçalho do arquivo, que é a planta do grafo, e regenere o desenho (`MEMORIA=:memory: node brain/graph.ts` ou `node brain/price-watch.ts --desenho`). Nó novo ou removido em `brain/graph.ts` também muda o desenho do painel ao vivo, `brain/live.html` (o `npm test` confere).
 - `Send` ou subgrafo só depois de trocar o reducer dos campos que dois nós escreveriam juntos (`campo()` sobrescreve) e de lembrar que as buscas no Google são uma por vez.
 
 # Pastas
