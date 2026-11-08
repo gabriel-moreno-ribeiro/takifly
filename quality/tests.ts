@@ -27,6 +27,7 @@ import { lerCsv } from "../rules/update-airports-data.ts";
 // O grafo abre o checkpoint ao ser carregado, por isso ele vem depois do MEMORIA, por await import.
 process.env.DADOS = ":memory:";
 process.env.MEMORIA = ":memory:";
+const { avisos: avisosDoPainel, ligarPainel, ouvinteAoVivo, resumirSaida } = await import("../brain/live.ts");
 const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, listarVoosParaPessoa, historicoLimpo, modelos, noContexto, noFerramentas, noLembrar, noSituacao, regrasDaViagem, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
 
 // ---------- HISTÓRICO ----------
@@ -1149,10 +1150,10 @@ const pediu = (name: string, args: Record<string, unknown>) => new AIMessage({ c
 const planoFalso = (...agentes: string[]) => pediu("definir_plano", { agentes, idioma: "português" });
 const textoDa = (carta: BaseMessage[]) => carta.map((mensagem) => mensagem.text).join("\n");
 
-async function rodarComFalsos(conversa: string, texto: string, forte: AIMessage[], especialista: AIMessage[]) {
+async function rodarComFalsos(conversa: string, texto: string, forte: AIMessage[], especialista: AIMessage[], callbacks: any[] = []) {
 	const falsos = { forte: new ModeloFalso(forte), especialista: new ModeloFalso(especialista) };
 	Object.assign(modelos, falsos);
-	const estado = await grafo.invoke({ messages: [new HumanMessage(texto)] }, { configurable: { thread_id: conversa } });
+	const estado = await grafo.invoke({ messages: [new HumanMessage(texto)] }, { configurable: { thread_id: conversa }, callbacks });
 	assert.deepEqual(falsos.forte.roteiro, [], `${conversa}: o modelo forte foi chamado menos vezes do que o roteiro previa`);
 	assert.deepEqual(falsos.especialista.roteiro, [], `${conversa}: o modelo barato foi chamado menos vezes do que o roteiro previa`);
 	return { estado, ...falsos };
@@ -1313,6 +1314,62 @@ assert.equal(terminou("pesquisador", pedidoCom(...chamou("buscar_voos", "Erro: a
 assert.equal(terminou("pesquisador", pedidoCom(...chamou("buscar_hoteis", "não achei hospedagem"))), true);
 assert.equal(terminou("analista", pedidoCom(...chamou("filtrar_voos", "1 voos passam"))), true);
 assert.equal(terminou("analista", pedidoCom(...chamou("buscar_voos", "voos"))), false);           // ferramenta de outro agente
+
+// ---------- O PAINEL AO VIVO ----------
+// o ouvinte vê cada nó começar e terminar, na ordem em que o grafo roda, e cada chamada de modelo
+rodada = await rodarComFalsos("falso-painel", "voos de GRU para REC em 16/12",
+	[planoFalso("pesquisador"), new AIMessage("Achei voos de GRU para Recife.")],
+	[pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "16/12" }), new AIMessage("pronto")],
+	[ouvinteAoVivo("falso-painel")]);
+const doPainel = avisosDoPainel.filter((aviso) => aviso.conversa === "falso-painel");
+assert.deepEqual(doPainel.filter((aviso) => aviso.fase === "inicio").map((aviso) => aviso.no),
+	["preparar", "contexto", "orquestrador", "pesquisador", "ferramentas", "pesquisador", "orquestrador", "conferir", "redator", "verificar", "planilha", "lembrar"]);
+const fimDe = (no: string) => doPainel.filter((aviso) => aviso.fase === "fim" && aviso.no === no).map((aviso) => aviso.detalhe);
+assert.deepEqual(fimDe("orquestrador"), ["plano: pesquisador", "segue o plano, sem chamar o modelo"]);
+assert.deepEqual(fimDe("pesquisador"), ["pediu: buscar_voos(GRU, REC, 16/12)", "voltou: pesquisador: terminou"]);
+assert.deepEqual(fimDe("verificar"), ["aprovou"]);
+assert.deepEqual(doPainel.filter((aviso) => aviso.fase === "modelo").map((aviso) => aviso.no), ["orquestrador", "pesquisador", "pesquisador", "redator"]);
+assert.equal(resumirSaida("verificar", { correcao: "O verificador recusou.\nProblemas:\n- R$ 999 não veio de ferramenta" }), "recusou: - R$ 999 não veio de ferramenta");
+// o orquestrador: plano do começo, plano refeito e desistência (limite de replanos ou replano sem plano)
+assert.equal(resumirSaida("orquestrador", { plano: [], idioma: "português" }), "ninguém precisa trabalhar");
+assert.equal(resumirSaida("orquestrador", { plano: ["analista"], replanos: 1 }), "refez o plano: analista");
+assert.equal(resumirSaida("orquestrador", { plano: [] }), "parou de replanejar: responde com o que tem");
+
+// o desenho da página tem exatamente os nós do grafo: mudou o grafo, o live.html precisa mudar junto
+const paginaDoPainel = readFileSync(import.meta.dirname + "/../brain/live.html", "utf8");
+const nosDoGrafo = Object.keys((await grafo.getGraphAsync()).nodes).filter((no) => !no.startsWith("__")).sort();
+assert.deepEqual([...paginaDoPainel.matchAll(/data-no="(\w+)"/g)].map((achado) => achado[1]).sort(), nosDoGrafo, "brain/live.html não bate com os nós de brain/graph.ts");
+
+// a página sai do servidor só no próprio Mac, com os nomes dos modelos de brain/models.ts. Porta 0: o sistema escolhe uma livre
+const painel = ligarPainel(0)!;
+await new Promise((pronto) => painel.once("listening", pronto));
+assert.equal((painel.address() as any).address, "127.0.0.1");
+const endereco = `http://127.0.0.1:${(painel.address() as any).port}`;
+const servida = await (await fetch(endereco)).text();
+assert.match(servida, /data-no="pesquisador"/);
+assert.match(servida, /Agente · glm-5\.3-flash/);
+assert.doesNotMatch(servida, /\{\{/);
+// um site que aponte o domínio dele para 127.0.0.1 (DNS rebinding) leva 403, e não as mensagens do Slack
+const { get } = await import("node:http");
+const deFora = await new Promise<number>((pronto) => get({ host: "127.0.0.1", port: (painel.address() as any).port, path: "/eventos", headers: { Host: "site-ruim.example.com" } }, (resposta) => { resposta.resume(); pronto(resposta.statusCode!); }));
+assert.equal(deFora, 403);
+// bot recém-ligado, nenhum aviso guardado: a página conecta na hora, sem ficar em "conectando…"
+const guardados = avisosDoPainel.splice(0);
+const conectou = await Promise.race([fetch(endereco + "/eventos").then((resposta) => resposta.status), new Promise((pronto) => setTimeout(() => pronto("demorou"), 1500))]);
+assert.equal(conectou, 200);
+avisosDoPainel.push(...guardados);
+// quem abre recebe o que já aconteceu, e depois cada aviso novo na hora
+const fluxo = (await fetch(endereco + "/eventos")).body!.getReader();
+assert.match(new TextDecoder().decode((await fluxo.read()).value), /^data: \{"hora"/);
+ouvinteAoVivo("falso-depois").handleChainStart(null, null, "r1", undefined, ["graph:step:1"], { langgraph_node: "preparar" });
+let recebido = "";
+while (!recebido.includes("falso-depois")) recebido += new TextDecoder().decode((await fluxo.read()).value);
+await fluxo.cancel();
+// porta ocupada (por exemplo, o bot e a prova ligados juntos) não derruba nada: o painel avisa no log e o resto segue
+const outro = ligarPainel((painel.address() as any).port)!;
+await new Promise((pronto) => outro.once("error", pronto));
+painel.closeAllConnections();
+painel.close();
 
 // ---------- LISTA DE FUNCIONALIDADES ----------
 // feature_list.json é onde mora o estado de cada item: um ativo por vez, e passing só com evidência

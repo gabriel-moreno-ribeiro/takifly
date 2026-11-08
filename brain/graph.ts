@@ -24,6 +24,7 @@
 //
 // Para perguntar pelo terminal:   node brain/graph.ts "voos de GRU para LIS em 12/12"
 // Para gerar o desenho:           node brain/graph.ts       (depois: open brain/graph.html)
+// Para ver ao vivo:               com o bot ligado, http://localhost:4500 (brain/live.ts; o desenho de lá é brain/live.html)
 
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -41,6 +42,7 @@ import { type Caderno, conferirNoRegistro, descreverMonitoramento, descreverVoo,
 import { semAcento } from "../rules/airports.ts";
 import { conferirViagem, paisDoAeroporto, type Trecho, type Viagem } from "../rules/rules.ts";
 import { anotar, rastrear } from "./tracing.ts";
+import { ouvinteAoVivo } from "./live.ts";
 import { nomesDosModelos, rotuloDosModelos } from "./models.ts";
 import { arrumarParaSlack, escreveuChamada, prometeuSemFazer, verificarResposta } from "./checker.ts";
 import { REGRA_DO_CUSTO_BENEFICIO, type Voo } from "../sources/flights.ts";
@@ -766,7 +768,8 @@ export function descreverPasso(no: string, resultado: any) {
 // stream roda o grafo igual ao invoke, mas entrega o resultado de cada nó assim que ele termina.
 // recursionLimit: o freio de mão do LangGraph, bem acima dos nossos limites; só dispara se um limite nosso falhar.
 async function rodar(entrada: { messages: BaseMessage[] } | null, config: { configurable: { thread_id: string } }, avisar: Avisar) {
-	const callbacks = rastrear(config.configurable.thread_id, rotuloDosModelos());
+	// o Langfuse guarda o rastro; o ouvinte do painel ao vivo (brain/live.ts) mostra cada nó na hora
+	const callbacks = [...rastrear(config.configurable.thread_id, rotuloDosModelos()), ouvinteAoVivo(config.configurable.thread_id)];
 	for await (const passo of await grafo.stream(entrada, { ...config, streamMode: "updates", recursionLimit: 60, callbacks })) {
 		// cada passo traz o resultado de um nó: conta o que vem depois dele, e o que cada ferramenta pedida vai fazer
 		for (const [no, resultado] of Object.entries(passo) as [string, any][]) {

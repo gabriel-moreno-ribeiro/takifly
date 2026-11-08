@@ -11,6 +11,7 @@ import { App } from "@slack/bolt";
 // puxa a função responder do NOSSO arquivo brain/graph.ts (o "./" quer dizer "aqui nesta mesma pasta")
 import { responder } from "./brain/graph.ts";
 import { explicarErro } from "./brain/checker.ts";
+import { ligarPainel } from "./brain/live.ts";
 
 // ---------- CHAVES ----------
 // lê o arquivo .env e guarda cada chave em process.env (depois esse process.env vai dar o valor da chave API em si ao process.env.SLACK_BOT_TOKEN
@@ -90,6 +91,7 @@ app.message(async ({ message, say, client }) => {
 // ---------- LIGAR ----------
 await app.start();
 console.log("Takifly ligado no Slack. O Taki está de orelha em pé. Ctrl+C para desligar.");
+ligarPainel();    // http://localhost:4500 mostra cada passo do grafo ao vivo (brain/live.ts)
 
 // ---------- MONITORAMENTOS ----------
 // o vigia de preços NÃO roda aqui: ele é outro programa (watcher.ts), para não cair junto se o bot cair.
