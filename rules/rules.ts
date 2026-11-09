@@ -253,3 +253,35 @@ export function conferirViagem(viagem: Viagem, hoje = hojeEmSaoPaulo(), valorEmR
 	// o redator lê de cima para baixo: primeiro o que impede a viagem
 	return avisos.sort((a, b) => Number(a.gravidade === "atencao") - Number(b.gravidade === "atencao"));
 }
+
+// ---------- AS REGRAS DE ENTRADA DE UM PAÍS ----------
+// A pergunta solta ("brasileiro precisa de visto para o Japão?"), sem viagem montada: a resposta vem da mesma
+// tabela que o conferirViagem usa, e não de um site. Visto é regra, e regra é código. Devolve null se o país
+// não está na tabela; aí quem pergunta busca na internet.
+const EM_INGLES = new Intl.DisplayNames(["en"], { type: "region" });
+const semAcentoNem = (texto: string) => texto.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/[^a-z]/g, "");
+
+// como a pessoa escreve e a tabela não tem
+const APELIDOS: Record<string, string> = { eua: "US", usa: "US", inglaterra: "GB", escocia: "GB", holanda: "NL" };
+
+export function regrasDeEntrada(pais: string) {
+	const procurado = semAcentoNem(pais);
+	if (APELIDOS[procurado]) return regrasDeEntrada(APELIDOS[procurado]);
+	const codigo = Object.keys(VISTO.paises).find((sigla) => [sigla, VISTO.paises[sigla].nome, EM_INGLES.of(sigla) ?? ""].some((nome) => semAcentoNem(nome) === procurado));
+	if (!codigo) return null;
+	const { nome, exige, dias, nota } = VISTO.paises[codigo];
+	const visto = {
+		isento: `não precisa de visto para turismo${dias ? `, até ${dias} dias` : ""}`,
+		"na-chegada": "o visto se resolve na chegada, no balcão da fronteira",
+		evisa: "precisa de visto eletrônico, pedido pela internet e aprovado antes de embarcar",
+		antes: "precisa de visto tirado no consulado antes de viajar",
+	}[exige];
+	const vacina = FEBRE_AMARELA.paises[codigo]
+		? "exige o certificado internacional de vacina contra febre amarela de quem chega do Brasil"
+		: "não está na lista da OMS de países que exigem a vacina de febre amarela de quem vem do Brasil";
+	return [
+		`${nome}, para passaporte brasileiro: ${visto}${nota ? ` (${nota})` : ""}.`,
+		`Febre amarela: ${vacina}.`,
+		`Fontes: ${VISTO.fonte}, conferida em ${VISTO.conferido_em}; ${FEBRE_AMARELA.fonte}. Regra de entrada muda: vale confirmar no consulado antes de viajar.`,
+	].join("\n");
+}

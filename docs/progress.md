@@ -29,6 +29,7 @@ Depois: `F13`, o bot só pesquisar com origem, destino e data de cada trecho (cu
 
 | Data | Commit | Modelo | Cenários | Fatos | Escrita | Piores famílias |
 |---|---|---|---|---|---|---|
+| 2026-11-08 | guia, antes do merge | glm-5.3 + glm-5.3-flash | 14 `guia-` + 40 sorteados | 14/14 e 39/40 | | o único que falhou, `sem-data`, pediu o que faltava com "me diz:" sem "?", e o juiz não reconhece; já falhava em 30/10. Juiz a rever com a pessoa |
 | 2026-11-08 | 63a4965 | glm-5.3 + glm-5.3-flash | 284 | 278/284; com o conserto 6048585 os 6 que falharam rodaram de novo e 4 passaram (~280/284) | | seguimento-mais-rapido (preço atribuído à Azul), lugar-sao-jose (não perguntou qual São José). Antes 282/284 com o grafo antigo. 26 s por caso, contra 37 s |
 | 2026-11-03 | sem commit | glm-5.3 | 10 mil gerados | 9767/10000 | 4,26/5 | saudacao 203/250, hotel 390/450, classe 369/400 |
 | 2026-10-30 | f52b5ee | glm-5.3, gemma4:31b, gpt-oss:20b, nemotron-3-nano:30b | 284 | ver `node quality/scoreboard.ts` (hoje quebra, item H09) | | |
@@ -37,6 +38,7 @@ Depois: `F13`, o bot só pesquisar com origem, destino e data de cada trecho (cu
 
 ## 2026-11-08
 
+- Agente guia com internet e clima (F28), a pedido da pessoa: `ver_clima` (Open-Meteo) e `buscar_na_web` (busca da Ollama, mesma chave). Testes sem crédito passam; uma revisão independente reprovou a primeira versão (página com "R$ 89" e link de golpe passavam no verificador) e os 10 problemas foram consertados com teste. Prova autorizada pela pessoa: 14/14 nos `guia-` (duas vezes, a segunda pelo `verify-feature.ts`) e 39/40 em 40 antigos sorteados.
 - Painel ao vivo (H19), a pedido da pessoa: http://localhost:4500 com o bot ligado. Callback do LangChain em `rodar()` + SSE, sem dependência nova (os prontos do GitHub são de Python). Revisão independente achou 10 problemas (o pior: DNS rebinding lia as mensagens), todos consertados com teste. Entra no ar com merge e restart.
 - Painel mais vivo, a pedido da pessoa: só as setas do caminho percorrido acendem, a seta do passo de agora corre em laranja com uma bolinha, e o aviso novo pisca na lista. `npm test` confere que cada seta liga nós que existem.
 - Interface no Slack, a pedido da pessoa (branch `gabriel-moreno-ribeiro/interface-slack`, sem commit): progresso passo a passo (F21 passou), links com nome e sem prévia, milhar com ponto, "Peguei" na fila, resposta para foto e áudio, erro sem jargão, emergência e aviso de preço para gente. Só código, sem prompt: não gasta crédito. Detalhes em `docs/AGENCIA.md`, "A interface no Slack". Mascote: `assets/taki-icone.png` e `assets/taki-emoji.png` gerados da foto da pessoa; o código usa `:taki:`. Antes do restart, a pessoa precisa subir o emoji no Slack. Quando a branch `whatsapp-em-andamento` voltar, o mapa `EMOJIS` de `sources/whatsapp.ts` precisa de `taki: "🐶"`. Falta: botões e boas-vindas (precisam de config no Slack).

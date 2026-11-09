@@ -99,7 +99,7 @@
 </header>
 <main>
 	<div>
-<svg id="grafo" viewBox="0 0 760 1040" role="img" aria-label="Grafo do bot: preparar, contexto, orquestrador com quatro especialistas e ferramentas, conferir ou situação, redator, verificar, planilha, lembrar">
+<svg id="grafo" viewBox="0 0 760 1040" role="img" aria-label="Grafo do bot: preparar, contexto, orquestrador com cinco especialistas (memoria, monitor, pesquisador, analista, guia) e ferramentas, conferir ou situação, redator, verificar, planilha, lembrar">
 	<defs>
 		<marker id="p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ponteira" d="M0,0 L10,5 L0,10 z"/></marker>
 		<marker id="pv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ponteira vermelha" d="M0,0 L10,5 L0,10 z"/></marker>
@@ -111,21 +111,24 @@
 	<path class="seta" id="seta-2" data-arestas="contexto>orquestrador" d="M380,190 V218" marker-end="url(#p)"/>
 
 	<!-- orquestrador ⇄ especialistas -->
-	<path class="seta" id="seta-3" data-arestas="orquestrador>memoria" d="M330,282 L120,336" marker-end="url(#p)"/>
-	<path class="seta volta" id="seta-4" data-arestas="memoria>orquestrador" d="M150,336 L345,282" marker-end="url(#p)"/>
-	<path class="seta" id="seta-5" data-arestas="orquestrador>monitor" d="M360,282 L285,336" marker-end="url(#p)"/>
-	<path class="seta volta" id="seta-6" data-arestas="monitor>orquestrador" d="M310,336 L372,282" marker-end="url(#p)"/>
-	<path class="seta" id="seta-7" data-arestas="orquestrador>pesquisador" d="M400,282 L455,336" marker-end="url(#p)"/>
-	<path class="seta volta" id="seta-8" data-arestas="pesquisador>orquestrador" d="M482,336 L415,282" marker-end="url(#p)"/>
-	<path class="seta" id="seta-9" data-arestas="orquestrador>analista" d="M430,282 L630,336" marker-end="url(#p)"/>
-	<path class="seta volta" id="seta-10" data-arestas="analista>orquestrador" d="M660,336 L445,282" marker-end="url(#p)"/>
-	<text class="rotulo" x="470" y="306" data-arestas="orquestrador>memoria memoria>orquestrador orquestrador>monitor monitor>orquestrador orquestrador>pesquisador pesquisador>orquestrador orquestrador>analista analista>orquestrador">tracejado: volta ao orquestrador</text>
+	<path class="seta" id="seta-e0a" data-arestas="orquestrador>memoria" d="M300,282 L84,336" marker-end="url(#p)"/>
+	<path class="seta volta" id="seta-e0b" data-arestas="memoria>orquestrador" d="M112,336 L312,282" marker-end="url(#p)"/>
+	<path class="seta" id="seta-e0c" data-arestas="memoria>ferramentas ferramentas>memoria" d="M98,390 L300,452" marker-start="url(#p)" marker-end="url(#p)"/>
+	<path class="seta" id="seta-e1a" data-arestas="orquestrador>monitor" d="M340,282 L224,336" marker-end="url(#p)"/>
+	<path class="seta volta" id="seta-e1b" data-arestas="monitor>orquestrador" d="M252,336 L352,282" marker-end="url(#p)"/>
+	<path class="seta" id="seta-e1c" data-arestas="monitor>ferramentas ferramentas>monitor" d="M238,390 L340,452" marker-start="url(#p)" marker-end="url(#p)"/>
+	<path class="seta" id="seta-e2a" data-arestas="orquestrador>pesquisador" d="M380,282 L364,336" marker-end="url(#p)"/>
+	<path class="seta volta" id="seta-e2b" data-arestas="pesquisador>orquestrador" d="M392,336 L392,282" marker-end="url(#p)"/>
+	<path class="seta" id="seta-e2c" data-arestas="pesquisador>ferramentas ferramentas>pesquisador" d="M378,390 L380,452" marker-start="url(#p)" marker-end="url(#p)"/>
+	<path class="seta" id="seta-e3a" data-arestas="orquestrador>analista" d="M420,282 L504,336" marker-end="url(#p)"/>
+	<path class="seta volta" id="seta-e3b" data-arestas="analista>orquestrador" d="M532,336 L432,282" marker-end="url(#p)"/>
+	<path class="seta" id="seta-e3c" data-arestas="analista>ferramentas ferramentas>analista" d="M518,390 L420,452" marker-start="url(#p)" marker-end="url(#p)"/>
+	<path class="seta" id="seta-e4a" data-arestas="orquestrador>guia" d="M460,282 L644,336" marker-end="url(#p)"/>
+	<path class="seta volta" id="seta-e4b" data-arestas="guia>orquestrador" d="M672,336 L472,282" marker-end="url(#p)"/>
+	<path class="seta" id="seta-e4c" data-arestas="guia>ferramentas ferramentas>guia" d="M658,390 L460,452" marker-start="url(#p)" marker-end="url(#p)"/>
+	<text class="rotulo" x="30" y="312" data-arestas="orquestrador>memoria memoria>orquestrador orquestrador>monitor monitor>orquestrador orquestrador>pesquisador pesquisador>orquestrador orquestrador>analista analista>orquestrador orquestrador>guia guia>orquestrador">tracejado: volta</text>
 
 	<!-- especialistas ⇄ ferramentas -->
-	<path class="seta" id="seta-11" data-arestas="memoria>ferramentas ferramentas>memoria" d="M110,390 L320,452" marker-start="url(#p)" marker-end="url(#p)"/>
-	<path class="seta" id="seta-12" data-arestas="monitor>ferramentas ferramentas>monitor" d="M290,390 L355,452" marker-start="url(#p)" marker-end="url(#p)"/>
-	<path class="seta" id="seta-13" data-arestas="pesquisador>ferramentas ferramentas>pesquisador" d="M470,390 L405,452" marker-start="url(#p)" marker-end="url(#p)"/>
-	<path class="seta" id="seta-14" data-arestas="analista>ferramentas ferramentas>analista" d="M650,390 L440,452" marker-start="url(#p)" marker-end="url(#p)"/>
 
 	<!-- orquestrador → conferir / situacao (pelas laterais) -->
 	<path class="seta" id="seta-15" data-arestas="orquestrador>conferir" d="M270,258 H18 V600 H112" marker-end="url(#p)"/>
@@ -157,12 +160,13 @@
 	<g class="no barato" data-no="contexto"><rect x="250" y="142" width="260" height="48" rx="8"/><text x="380" y="162">contexto</text><text class="det" x="380" y="180">resume o que saiu da janela</text></g>
 	<g class="no forte" data-no="orquestrador"><rect x="270" y="218" width="220" height="64" rx="8"/><text x="380" y="242">orquestrador</text><text class="det" x="380" y="260">monta o plano, refaz até 2x</text></g>
 
-	<g class="no agente" data-no="memoria"><rect x="35" y="336" width="150" height="54" rx="8"/><text x="110" y="358">memoria</text><text class="det" x="110" y="376">4 ferramentas</text></g>
-	<g class="no agente" data-no="monitor"><rect x="215" y="336" width="150" height="54" rx="8"/><text x="290" y="358">monitor</text><text class="det" x="290" y="376">3 ferramentas</text></g>
-	<g class="no agente" data-no="pesquisador"><rect x="395" y="336" width="150" height="54" rx="8"/><text x="470" y="358">pesquisador</text><text class="det" x="470" y="376">4 ferramentas</text></g>
-	<g class="no agente" data-no="analista"><rect x="575" y="336" width="150" height="54" rx="8"/><text x="650" y="358">analista</text><text class="det" x="650" y="376">6 ferramentas</text></g>
-	<text class="rotulo" x="380" y="410" text-anchor="middle" data-arestas="memoria>ferramentas monitor>ferramentas pesquisador>ferramentas analista>ferramentas">"pronto" só vale se terminou() confirmar · até 6 passos cada, 14 no pedido</text>
+	<text class="rotulo" x="380" y="410" text-anchor="middle" data-arestas="memoria>ferramentas monitor>ferramentas pesquisador>ferramentas analista>ferramentas guia>ferramentas">"pronto" só vale se terminou() confirmar · até 6 passos cada, 14 no pedido</text>
 
+	<g class="no agente" data-no="memoria"><rect x="34" y="336" width="128" height="54" rx="8"/><text x="98" y="358">memoria</text><text class="det" x="98" y="376">4 ferramentas</text></g>
+	<g class="no agente" data-no="monitor"><rect x="174" y="336" width="128" height="54" rx="8"/><text x="238" y="358">monitor</text><text class="det" x="238" y="376">3 ferramentas</text></g>
+	<g class="no agente" data-no="pesquisador"><rect x="314" y="336" width="128" height="54" rx="8"/><text x="378" y="358">pesquisador</text><text class="det" x="378" y="376">4 ferramentas</text></g>
+	<g class="no agente" data-no="analista"><rect x="454" y="336" width="128" height="54" rx="8"/><text x="518" y="358">analista</text><text class="det" x="518" y="376">6 ferramentas</text></g>
+	<g class="no agente" data-no="guia"><rect x="594" y="336" width="128" height="54" rx="8"/><text x="658" y="358">guia</text><text class="det" x="658" y="376">2 ferramentas</text></g>
 	<g class="no codigo" data-no="ferramentas"><rect x="270" y="452" width="220" height="48" rx="8"/><text x="380" y="472">ferramentas</text><text class="det" x="380" y="490">registro confere dono e limite</text></g>
 
 	<g class="no codigo" data-no="conferir"><rect x="112" y="576" width="176" height="48" rx="8"/><text x="200" y="596">conferir</text><text class="det" x="200" y="614">visto, passaporte, vacina</text></g>
@@ -209,6 +213,7 @@
 	const bolinha = document.createElementNS("http://www.w3.org/2000/svg", "circle");
 	bolinha.setAttribute("id", "bolinha");
 	bolinha.setAttribute("r", "6");
+	bolinha.style.display = "none";    // só aparece quando há um passo correndo
 	grafo.appendChild(bolinha);
 	let passoAnimado = null;
 	let avisosDesenhados = 0;

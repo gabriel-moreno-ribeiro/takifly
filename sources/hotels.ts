@@ -120,7 +120,7 @@ function tirarHtml(bruto: string) {
 // aqui, na entrada, e não depois. O "|" sai de propósito: é o separador das colunas da nossa linha.
 export function textoDeFora(bruto: unknown, limite = 80) {
 	const limpo = tirarHtml(String(bruto ?? ""))
-		.replace(/[^\p{L}\p{N} .,\-&'+()$/:º–]/gu, " ")
+		.replace(/[^\p{L}\p{N} .,\-&'+()$/:º–%°]/gu, " ")    // % e °: chance de chuva, taxa e temperatura vêm de fora (web.ts, weather.ts)
 		.replace(/\s+/g, " ")
 		.trim();
 	return limpo.slice(0, limite);

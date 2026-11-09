@@ -249,7 +249,7 @@
 			"verification": "grep -q 'read_travel_guide' brain/tools.ts && node quality/exam.ts guia",
 			"state": "not_started",
 			"evidence": "",
-			"notes": "FUTURE 2.2 e 2.3; depende de F27"
+			"notes": "FUTURE 2.1 e 2.2. O agente guia nasceu em 2026-11-08 com internet e clima (F28); falta só a fonte fixa do Wikivoyage, que dá resposta mais estável que a busca"
 		},
 		{
 			"id": "F09",
@@ -412,6 +412,15 @@
 			"state": "passing",
 			"evidence": "2026-11-08, commit 51b6b8a com mudanças sem commit: Tudo certo!",
 			"notes": "aula 07; docs/lessons-ibm.md (condição de parada verificável). Hoje criarEspecialista sai por contagem (PASSOS_POR_AGENTE) ou por \"pronto\""
+		},
+		{
+			"id": "F28",
+			"area": "brain",
+			"behavior": "Agente guia: responde dúvidas de viagem que não são preço com dados de fora. ver_clima dá o tempo agora e a previsão de 7 dias (Open-Meteo); regras_de_entrada dá visto e vacina pela tabela do bot; buscar_na_web pesquisa o resto (busca da Ollama, mesma chave). Texto de página chega limpo e marcado como dado, não prova preço em R$, e o redator cita a fonte.",
+			"verification": "grep -q \"buscar_na_web\" brain/tools.ts && node quality/tests.ts && node quality/exam.ts guia-",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 3dc2fef com mudanças sem commit: Nota de glm-5.3+glm-5.3-flash: 14 de 14",
+			"notes": "pedido da pessoa em 2026-11-08; FUTURE 2.3. A verificação gasta crédito: 14 cenários guia-. Open-Meteo grátis é só para uso não comercial"
 		},
 		{
 			"id": "F30",
