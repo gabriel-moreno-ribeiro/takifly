@@ -16,7 +16,9 @@ stale_after: 2026-11-11T00:00:00Z
 - **O juiz das mensagens seguidas ganhou `cancelar`**: "stop" virava `refazer` e começava um pedido novo com o texto "stop". Agora para o pedido rodando e os da fila, e diz "Parei o pedido."
 - **F74 no Slack, de verdade**: "Salvador → Alemanha, quando estiver mais barato" respondeu Düsseldorf em 29/11 por R$ 1.809 em uns 2,5 min; 3 dos 22 calendários falharam (Erfurt, Hannover, Stuttgart), e a resposta disse isso.
 - **O juiz das mensagens seguidas agora chama o Jev** (TypeSafe, `POST https://api.typesafe.ai/v1/systemone`, pergunta `choice` com as quatro decisões), e não a Ollama, que era lenta. Precisa de `TYPESAFE_API_KEY` no `.env` da pasta principal; sem ela, continua na Ollama. Jev fora do ar vale fila.
-- **Próximo passo**: pôr a `TYPESAFE_API_KEY` no `.env`, reiniciar e mandar um "para" com um pedido rodando; depois, ver por que 3 calendários falharam (429 do Google?) e, se for o ritmo, aumentar a pausa ou tentar de novo uma vez. Se 2 min for demais para país grande, fazer os calendários em paralelo (com cuidado com o 429 do Google).
+- **Jev ligado** (chave no `.env`): 5 de 5 certos em ~0,2 s cada, `jev-1.14.0`. No Slack, "pare" deu cancelar com 99%.
+- **"volte" retoma o pedido parado** por 30 min, e o `buscar_mais_barato` aceita "não importa a data" (era recusado no pedido de Salvador para Portugal).
+- **Próximo passo (antigo)**: pôr a `TYPESAFE_API_KEY` no `.env`, reiniciar e mandar um "para" com um pedido rodando; depois, ver por que 3 calendários falharam (429 do Google?) e, se for o ritmo, aumentar a pausa ou tentar de novo uma vez. Se 2 min for demais para país grande, fazer os calendários em paralelo (com cuidado com o 429 do Google).
 
 # Madrugada 08→09/11
 

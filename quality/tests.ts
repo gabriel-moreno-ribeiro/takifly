@@ -464,6 +464,10 @@ assert.match(await chamar("comparar_trechos", {}, cadernoNovo(undefined, [voo, b
 	await assert.rejects(chamar("buscar_mais_barato", { origem: "Salvador", destino: "Alemanha" }, cadernoNovo(["pesquise um voo de salvador ate a alemanha"])), /não disse o mês/);
 	await assert.rejects(chamar("buscar_mais_barato", { origem: "Salvador", destino: "EUA", de: "dezembro" }, cadernoNovo(["Salvador para os EUA em dezembro"])), /95 aeroportos grandes|aeroportos grandes, é demais/);
 	await assert.rejects(chamar("buscar_mais_barato", { origem: "Salvador", destino: "Munique" }, cadernoNovo(["voos de Salvador para Munique, qualquer dia serve"])), /não disse o mês/);
+	// 09/11, no Slack: "não importa a data" era recusado
+	calendarios.length = 0;
+	await chamar("buscar_mais_barato", { origem: "Salvador", destino: "Portugal" }, cadernoNovo(["quero ir de salvador ate portugal, nao importa a data nem a cidade de portugal, apenas qual a mais barata"]));
+	assert.equal(calendarios.length, aeroportosDoPais("Portugal")!.codigos.length);
 	await assert.rejects(chamar("buscar_mais_barato", { origem: "GRU", destino: "LIS", de: "10/12", ate: "18/12" }, cadernoNovo(["GRU para LIS nos dias 10/12, 15/12 e 18/12, qual o mais barato?"])), /dias soltos/);
 	// mais travas do revisor (09/11): pedaço de mês, ano não dito, dias soltos com "ou", data sem o mês, e o "sem período"
 	// recusado quando a última mensagem traz data ou mês
@@ -1965,7 +1969,7 @@ painelDoContexto.closeAllConnections();
 painelDoContexto.close();
 
 // ---------- VÁRIAS MENSAGENS SEGUIDAS ----------
-const { ESPERA_POR_MAIS, lerRespostaDoJev, PAREI, PEGUEI, pedidoAoJev, PRAZO_DO_JUIZ, REFAZENDO } = await import("../brain/channel.ts");
+const { ESPERA_POR_MAIS, lerRespostaDoJev, PAREI, PEGUEI, pedidoAoJev, PRAZO_DO_JUIZ, REFAZENDO, RETOMANDO } = await import("../brain/channel.ts");
 // um relógio de mentira: o teste anda com o tempo na mão, sem esperar de verdade
 function relogioFalso() {
 	let agora = 0;
@@ -2135,6 +2139,19 @@ assert.ok(avisosDoPainel.some((aviso) => aviso.conversa === "falso-cancelar" && 
 	await canaisDoJev.vazio("falso-jev");
 	assert.equal(textosDe("falso-jev").at(-1), PAREI);
 	assert.ok(avisosDoPainel.some((aviso) => aviso.conversa === "falso-jev" && aviso.detalhe === "cancelar: Jev, 97% de confiança"));
+	// "volte" depois do "para" (09/11): o pedido parado começa de novo, e o "volte" não vira pedido
+	await canaisDoJev.receber("falso-jev", "volte");
+	await relogioDoJev.avancar(ESPERA_POR_MAIS);
+	assert.deepEqual(textosDe("falso-jev").slice(-2), [RETOMANDO, ":taki: O Taki está farejando..."]);
+	assert.equal(grafoDoJev.pedidos.at(-1)!.texto, "voos de GRU para FOR em 17/12");
+	grafoDoJev.pedidos.at(-1)!.responder("Voos para Fortaleza no dia 17.");
+	await canaisDoJev.vazio("falso-jev");
+	// o pedido retomado já foi: outro "volte" é conversa nova
+	await canaisDoJev.receber("falso-jev", "volte");
+	await relogioDoJev.avancar(ESPERA_POR_MAIS);
+	assert.equal(grafoDoJev.pedidos.at(-1)!.texto, "volte");
+	grafoDoJev.pedidos.at(-1)!.responder("Oi!");
+	await canaisDoJev.vazio("falso-jev");
 	// o Jev fora do ar: vale fila, e a Ollama continua sem ser chamada
 	respostaDoJev = async () => { throw new Error("o Jev respondeu com erro 529"); };
 	await canaisDoJev.receber("falso-jev", "voos de GRU para FOR em 18/12");

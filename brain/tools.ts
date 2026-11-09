@@ -174,7 +174,8 @@ const DIAS_SEM_PERIODO = 90;        // "quando estiver mais barato", sem mês: o
 // sem período, só quando a pessoa quer o mais barato E disse que a data não importa. Sem "barato", "qualquer dia
 // serve" continua virando pergunta (cenário data-qualquer-dia): ela não pediu o mais barato
 const MAIS_BARATO = /barat|em conta/;
-const DATA_NAO_IMPORTA = /qualquer (data|dia|epoca|mes|momento)|tanto faz|datas? flexive|quando (estiver|for|tiver|ficar|sair)|(data|dia|epoca|mes|periodo) mais (barat|em conta)/;
+// "não importa a data" ficou de fora até 09/11, e o pedido de Salvador para Portugal foi recusado
+const DATA_NAO_IMPORTA = /qualquer (data|dia|epoca|mes|momento)|tanto faz|n(ao)? importa|independente da data|datas? flexive|quando (estiver|for|tiver|ficar|sair)|(data|dia|epoca|mes|periodo) mais (barat|em conta)/;
 // pedaço de mês não é o mês inteiro: "primeira semana de dezembro" pesquisaria dezembro todo
 const PEDACO_DE_MES = /\b(primeira|segunda|terceira|quarta|ultima) (semana|quinzena)|\b(inicio|comeco|meio|metade|fim|final) d[eo]\b/;
 // dias soltos ("10/12, 15/12 e 18/12", "10/12 ou 15/12", "10, 15 e 18 de dezembro"): o calendário de 10 a 18 conferiria

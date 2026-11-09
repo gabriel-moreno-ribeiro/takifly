@@ -101,6 +101,10 @@ export const PRAZO_DO_JUIZ = 8_000;      // depois disso, sem decisão do juiz, 
 export const REFAZENDO = ":taki: Vi que você mudou o pedido. Refaço com a mensagem nova junto.";
 export const PAREI = ":taki: Parei o pedido. Quando quiser, é só mandar de novo.";
 export const NADA_PARA_PARAR = ":taki: Não tinha nada rodando para parar: o pedido já tinha terminado.";
+export const RETOMANDO = ":taki: Volto para o pedido que eu tinha parado.";
+// "volte", "continua", "pode seguir": a mensagem curta que só pede para voltar ao pedido parado
+const RETOMAR = /^(volt[ae]|continu[ae]|retom[ae]|prossig[ae]|segue|pode (voltar|continuar|seguir|retomar))\b[^?]{0,30}$/;
+const TEMPO_PARA_RETOMAR = 30 * 60_000;    // depois de meia hora, "volte" é conversa nova
 
 // fase: na fila, rodando (dá para cancelar), respondendo (a resposta já saiu do grafo: tarde para refazer) ou feito
 type Pedido = { tipo: "pedido"; textos: string[]; controle: AbortController; fase: "fila" | "rodando" | "respondendo" | "feito" };
@@ -114,6 +118,7 @@ type EstadoDoCanal = {
 	chegando: string[];                      // as mensagens do lote que ainda está esperando o cronômetro
 	pararCronometro: (() => void) | null;
 	decidindo: Promise<void>;                // um lote decide de cada vez: dois juízes ao mesmo tempo poderiam cancelar o mesmo pedido
+	parado: { textos: string[]; quando: number } | null;    // o último pedido parado com "para", que um "volte" retoma
 };
 
 // o relógio que o teste troca: assim ele não espera de verdade
@@ -171,7 +176,7 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 	const canais = new Map<string, EstadoDoCanal>();
 
 	const doCanal = (canal: string) => {
-		if (!canais.has(canal)) canais.set(canal, { fila: [], trabalhando: false, trabalho: Promise.resolve(), atual: null, chegando: [], pararCronometro: null, decidindo: Promise.resolve() });
+		if (!canais.has(canal)) canais.set(canal, { fila: [], trabalhando: false, trabalho: Promise.resolve(), atual: null, chegando: [], pararCronometro: null, decidindo: Promise.resolve(), parado: null });
 		return canais.get(canal)!;
 	};
 	// se o Slack recusar os blocos, a mensagem vai só em texto: a linha é enfeite, a pessoa não pode ficar sem a resposta
@@ -283,6 +288,14 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 		const rodando = estado.atual && estado.atual.fase === "rodando" && !estado.atual.controle.signal.aborted ? estado.atual : null;
 		const alvo = rodando ?? estado.fila.find((tarefa): tarefa is Pedido => tarefa.tipo === "pedido");
 		if (!alvo) {
+			// "volte" depois de um "para": o pedido parado começa de novo, em vez de virar conversa solta (09/11)
+			const parado = estado.parado;
+			estado.parado = null;
+			if (parado && Date.now() - parado.quando <= TEMPO_PARA_RETOMAR && RETOMAR.test(semAcento(lote.join(" ")).trim())) {
+				anotarNoPainel(canal, "juiz", `retomar: ${parado.textos.join(" / ").slice(0, 100)}`);
+				await dizer(canal, RETOMANDO);
+				return enfileirar(canal, novoPedido(parado.textos));
+			}
 			if (estado.trabalhando) await dizer(canal, PEGUEI);    // um compactar ou excluir rodando
 			return enfileirar(canal, novoPedido(lote));
 		}
@@ -297,6 +310,8 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 			estado.fila = estado.fila.filter((tarefa) => tarefa.tipo !== "pedido");
 			const agora = estado.atual && estado.atual.fase === "rodando" && !estado.atual.controle.signal.aborted ? estado.atual : null;
 			if (agora) cancelar(canal, "a pessoa pediu para parar");
+			const textos = [...(agora?.textos ?? []), ...naFila.flatMap((pedido) => pedido.textos)];
+			if (textos.length > 0) estado.parado = { textos, quando: Date.now() };
 			return void (await dizer(canal, agora || naFila.length > 0 ? PAREI : NADA_PARA_PARAR));
 		}
 		// o juiz leva segundos, e nesse tempo o alvo pode ter mudado de fase. Olha onde ele está AGORA:
