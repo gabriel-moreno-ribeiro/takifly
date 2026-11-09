@@ -168,6 +168,9 @@ export function arrumarParaSlack(texto: string) {
 			const limpo = url.replace(/[.,;:]+$/, "");
 			return `<${limpo}|${nomeDoLink(limpo)}>${url.slice(limpo.length)}`;
 		})
+		// data de máquina vira dd/mm (09/11): "2026-12-12" e "15/11/2026" saíam assim no Slack. Dentro de link não mexe
+		.replace(/(?<![\w/=.-])(\d{4})-(\d{2})-(\d{2})(?![\w/-])/g, "$3/$2")
+		.replace(/(?<![\w/=.-])(\d{2})\/(\d{2})\/\d{4}(?![\w/-])/g, "$1/$2")
 		// "R$ 25650" vira "R$ 25.650". Não mexe em "R$ 3000,50" nem em número que já tem ponto
 		.replace(/R\$ ?(\d{4,})(?![\d.,]\d|\d)/g, (_, numero) => "R$ " + Number(numero).toLocaleString("pt-BR"))
 		.trim();

@@ -38,7 +38,7 @@ process.env.LANGFUSE_SECRET_KEY = "";
 process.env.TYPESAFE_API_KEY = "";
 const { checarMonitoramentos, paraGente } = await import("../brain/price-watch.ts");
 const { avisos: avisosDoPainel, ligarPainel, ouvinteAoVivo, resumirSaida } = await import("../brain/live.ts");
-const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, historicoLimpo, listarConversas, listarVoosParaPessoa, modelos, noContexto, parDeCidades, noFerramentas, noLembrar, noSituacao, regrasDaViagem, responder, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
+const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, historicoLimpo, listarConversas, listarVoosParaPessoa, modelos, noConferir, noContexto, parDeCidades, noFerramentas, noLembrar, noSituacao, regrasDaViagem, responder, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
 
 // ---------- HISTÓRICO ----------
 const pergunta = new HumanMessage("oi");
@@ -811,6 +811,9 @@ assert.equal(verificarResposta("Anotei a validade do seu passaporte.", "Guardado
 assert.equal(arrumarParaSlack("<think>hmm</think>**Oi** e **tchau**\n## Título"), "*Oi* e *tchau*\n*Título*");
 assert.equal(arrumarParaSlack("<!channel> oi <@U123>"), "oi");
 assert.equal(arrumarParaSlack("Air\u202FEuropa\u00A0por R$\u202F10"), "Air Europa por R$ 10");
+// data de máquina vira dd/mm (09/11), mas dentro de link fica como está
+assert.equal(arrumarParaSlack("GRU → NAT em 2026-12-12, saindo no domingo 15/11/2026"), "GRU → NAT em 12/12, saindo no domingo 15/11");
+assert.equal(arrumarParaSlack("<https://x.com/2026-12-12|link>"), "<https://x.com/2026-12-12|link>");
 assert.equal(arrumarParaSlack("[Comprar](https://voos/1)"), "<https://voos/1|Comprar>");
 assert.equal(recusa(arrumarParaSlack("[Comprar](https://voos/1)")), false);    // o link continua conferido depois de arrumado
 
@@ -939,6 +942,14 @@ assert.match(semCadastro.recadoExtra, /validade do passaporte/);
 const comCadastro = regrasDaViagem([vooIda, vooVolta], { nacionalidade: "BR", passaporte_validade: "2027-06-01", nascimento: null, vacina_febre_amarela: null }, "2026-11-02")!;
 assert.equal(comCadastro.recadoExtra, "");
 assert.deepEqual(comCadastro.avisos.map((aviso) => aviso.regra), ["passaporte"]);
+
+// o convite sai uma vez por conversa (09/11: saiu de novo com o campo convidou falso, depois de pedidos cancelados).
+// Uma resposta do bot que já pediu a data de nascimento conta como convite feito
+const pedidoDeLisboa = { voos: [vooIda], buscas: [`${vooIda.origem}|${vooIda.destino}|${vooIda.data}|1|0|economica`], recados: [], convidou: false };
+const primeiraVez = noConferir({ ...pedidoDeLisboa, messages: [new HumanMessage("voos de GRU para LIS")] } as any, { configurable: { thread_id: "teste-convite" } } as any) as any;
+assert.match(primeiraVez.recados.join(), /validade do passaporte/);
+const outraVez = noConferir({ ...pedidoDeLisboa, messages: [new AIMessage("Achei voos. Se você contar a validade do passaporte e a data de nascimento, eu confiro."), new HumanMessage("e para o Porto?")] } as any, { configurable: { thread_id: "teste-convite" } } as any);
+assert.deepEqual(outraVez, {});
 
 // destino que precisa de visto aparece mesmo sem dossiê: não depende de documento nenhum
 const paraMiami = regrasDaViagem([{ ...vooIda, destino: "MIA" }], null, "2026-11-02")!;
@@ -1783,6 +1794,13 @@ rodada = await rodarComFalsos("falso-pares", "voos de GRU para SSA e para LIS em
 assert.deepEqual(pedidosDePlanilha.slice(-2).map((pedido) => pedido.planilha), [null, null]);
 assert.match(rodada.estado.messages.at(-1).text, /:bar_chart: Planilha: <[^|]+\|abrir os 1 voos de São Paulo–Salvador na planilha>\nNão consegui criar a planilha de São Paulo–Lisboa agora/);
 assert.deepEqual(rodada.estado.novos.map((um: Voo) => um.destino), ["LIS"]);
+// os dois pares dando certo: uma linha só no fim, com as duas planilhas (09/11)
+const planilhaQueFalhaEmLisboa = servicos.atualizarPlanilha;
+servicos.atualizarPlanilha = (async (planilha: string | null, _titulo: string, abas: any[]) => (pedidosDePlanilha.push({ planilha, abas }), planilha ?? `https://planilha.falsa/par-${pedidosDePlanilha.length}`)) as any;
+const doisParesDeNovo = new AIMessage({ content: "", tool_calls: [{ id: "falso-pares-3", name: "buscar_voos", args: { origem: "GRU", destino: "REC", data: "15/12" } }, { id: "falso-pares-4", name: "buscar_voos", args: { origem: "GRU", destino: "FOR", data: "15/12" } }] });
+rodada = await rodarComFalsos("falso-dois-pares", "voos de GRU para REC e para FOR em 15/12", [planoFalso("pesquisador"), new AIMessage("Achei voos.")], [doisParesDeNovo, new AIMessage("pronto")]);
+assert.match(rodada.estado.messages.at(-1).text, /\n:bar_chart: Planilhas: <[^|]+\|São Paulo–Recife, 1 voos> · <[^|]+\|São Paulo–Fortaleza, 1 voos>$/);
+servicos.atualizarPlanilha = planilhaQueFalhaEmLisboa;
 // busca de 150 voos: a planilha leva 100, e a pessoa e o painel ficam sabendo dos 50 que não couberam
 servicos.buscarVoos = umaCompanhia("Muitas", 150);
 rodada = await pesquisarNoPar("falso-pares", "GRU", "CNF", "15/12");
@@ -2323,6 +2341,64 @@ const jaCancelado = new AbortController();
 jaCancelado.abort();
 await assert.rejects(responder("falso-cancelado", "voos", () => {}, jaCancelado.signal));
 assert.equal((await naMemoria("falso-cancelado")).values.messages.length, 4);
+
+// ---------- OS CARTÕES DE VOO, OS BOTÕES E AS BOAS-VINDAS ----------
+// 09/11: a resposta vinha com horário, escala, duração e link no meio do texto, num formato diferente a cada vez.
+// Agora cada voo citado vira um cartão montado pelo código, com o botão de comprar, e embaixo vêm os botões de próximo passo
+{
+	const { BOAS_VINDAS, blocosDaResposta, cartaoDoVoo, telaInicial, voosCitados } = await import("../brain/channel.ts");
+	const azul = { ...voo, companhia: "Azul", preco: 2067, escalas: 1, duracao_min: 1005, saida: "23:35", chegada: "16/11 19:20", data: "2026-11-15", origem: "SSA", destino: "OPO", link: "https://voos.falsos/azul" };
+	const tap = { ...voo, companhia: "TAP Air Portugal", preco: 4789, data: "2026-11-15", link: "https://voos.falsos/tap" };
+	const latam = { ...voo, companhia: "LATAM + Iberia", preco: 2067, link: "https://voos.falsos/latam" };
+	const resposta = "O mais barato é a *R$ 2.067* na Azul, no dom, 15/11.\nComprar: <https://voos.falsos/azul|ver no Google Voos>\n\nSe quiser direto, a TAP sai por R$ 4.789.";
+	// citados na ordem do texto; o mesmo preço de outra companhia (LATAM) não entra; voo não citado não entra
+	assert.deepEqual(voosCitados([latam, tap, azul, voo], resposta).map((um) => um.companhia), ["Azul", "TAP Air Portugal"]);
+	assert.deepEqual(voosCitados([azul], "Não achei nada."), []);
+	assert.equal(voosCitados(Array.from({ length: 5 }, (_, i) => ({ ...azul, preco: 1000 + i, link: `x${i}` })), "R$ 1.000, R$ 1.001, R$ 1.002 e R$ 1.003 na Azul").length, 3);
+	// o cartão: preço, companhia, dia curto, horários, escalas, duração e o botão de comprar com o link do voo
+	const cartao = cartaoDoVoo(azul, 0);
+	assert.equal(cartao.text.text, "*R$ 2.067* · Azul\ndom, 15/11 · SSA 23:35 → OPO 16/11 19:20\n1 escala · 16h45");
+	assert.equal(cartao.accessory.url, "https://voos.falsos/azul");
+	assert.match(cartaoDoVoo(voo, 1).text.text, /\ndireto · 10h00$/);
+	// a linha "Comprar" do voo com cartão sai do texto; o resto fica, e os botões de próximo passo vêm no fim
+	const montada = blocosDaResposta(resposta, [azul, tap]);
+	assert.equal(montada.texto, "O mais barato é a *R$ 2.067* na Azul, no dom, 15/11.\n\nSe quiser direto, a TAP sai por R$ 4.789.");
+	assert.deepEqual(montada.blocos.map((bloco: any) => bloco.type), ["section", "section", "section", "actions"]);
+	assert.deepEqual((montada.blocos.at(-1) as any).elements.map((botao: any) => botao.action_id), ["frase_0", "frase_1", "frase_2"]);
+
+	// no canal: com voos citados, a resposta vai com os cartões; se o Slack recusar, vai a resposta inteira, com o link
+	const mandadas: { text: string; blocks?: any[] }[] = [];
+	let recusar = false;
+	const saidaComBlocos = { dizer: async (_canal: string, mensagem: { text: string; blocks?: any[] }) => { if (recusar && mensagem.blocks?.some((bloco) => bloco.accessory)) throw new Error("invalid_blocks"); mandadas.push(mensagem); return "m"; }, editar: async () => {}, apagar: async () => {} };
+	const canaisComCartoes = criarCanais(saidaComBlocos, { responder: async () => resposta, relogio: { depois: (_ms: number, fazer: () => void) => (queueMicrotask(fazer), () => {}) }, voosDaConversa: async () => [azul, tap] });
+	await canaisComCartoes.receber("falso-cartoes", "o mais barato de Salvador para Portugal");
+	await canaisComCartoes.vazio("falso-cartoes");
+	const comCartoes = mandadas.at(-1)!;
+	assert.equal(comCartoes.blocks!.filter((bloco) => bloco.accessory).length, 2);
+	assert.deepEqual(comCartoes.blocks!.slice(-2).map((bloco) => bloco.type), ["actions", "divider"]);
+	recusar = true;
+	await canaisComCartoes.receber("falso-cartoes", "de novo");
+	await canaisComCartoes.vazio("falso-cartoes");
+	assert.deepEqual(mandadas.at(-1), { text: resposta });
+
+	// o botão de frase: a frase aparece no canal e vira um pedido
+	recusar = false;
+	await canaisComCartoes.frase("falso-cartoes", "mostra só os voos diretos");
+	await canaisComCartoes.vazio("falso-cartoes");
+	assert.ok(mandadas.some((mensagem) => mensagem.text === ":point_right: _mostra só os voos diretos_"));
+
+	// as boas-vindas saem uma vez, e nunca para quem já conversou
+	const antesDasBoasVindas = mandadas.length;
+	await canaisComCartoes.boasVindas("falso-novo");
+	await canaisComCartoes.boasVindas("falso-novo");
+	await canaisComCartoes.boasVindas(doContexto);    // essa conversa já está gravada (bloco do contexto, acima)
+	assert.deepEqual(mandadas.slice(antesDasBoasVindas), [BOAS_VINDAS]);
+	assert.deepEqual((BOAS_VINDAS.blocks[1] as any).elements.map((botao: any) => botao.action_id), ["frase_0", "frase_1", "frase_2"]);
+	// a aba Home: o Slack recusa header com mais de 150 letras e seção com mais de 3000
+	const home = telaInicial();
+	assert.equal(home.type, "home");
+	assert.ok(home.blocks.every((bloco: any) => (bloco.text?.text ?? "").length <= (bloco.type === "header" ? 150 : 3000)));
+}
 
 // ---------- O PAINEL AO VIVO ----------
 // o ouvinte vê cada nó começar e terminar, na ordem em que o grafo roda, e cada chamada de modelo
