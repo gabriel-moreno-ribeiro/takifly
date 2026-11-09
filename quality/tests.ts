@@ -2356,26 +2356,34 @@ assert.equal((await naMemoria("falso-cancelado")).values.messages.length, 4);
 	assert.deepEqual(voosCitados([azul], "Não achei nada."), []);
 	assert.equal(voosCitados(Array.from({ length: 5 }, (_, i) => ({ ...azul, preco: 1000 + i, link: `x${i}` })), "R$ 1.000, R$ 1.001, R$ 1.002 e R$ 1.003 na Azul").length, 3);
 	// o cartão: preço, companhia, dia curto, horários, escalas, duração e o botão de comprar com o link do voo
-	const cartao = cartaoDoVoo(azul, 0);
-	assert.equal(cartao.text.text, "*R$ 2.067* · Azul\ndom, 15/11 · SSA 23:35 → OPO 16/11 19:20\n1 escala · 16h45");
+	const cartao = cartaoDoVoo(azul, 0, "💰 Mais barato");
+	assert.equal(cartao.text.text, "*R$ 2.067*  ·  Azul   💰 Mais barato");
+	assert.deepEqual(cartao.fields.map((campo) => campo.text), ["*Quando*\ndom, 15/11", "*Trajeto*\nSSA 23:35 → OPO 16/11 19:20", "*Escalas*\n1 escala", "*Duração*\n16h45"]);
 	assert.equal(cartao.accessory.url, "https://voos.falsos/azul");
-	assert.match(cartaoDoVoo(voo, 1).text.text, /\ndireto · 10h00$/);
+	// chegada no mesmo dia: só a hora (o 12/12 do voo de teste chega 12/12 20:00)
+	assert.deepEqual(cartaoDoVoo(voo, 1).fields.slice(1).map((campo) => campo.text), ["*Trajeto*\nGRU 10:00 → LIS 20:00", "*Escalas*\ndireto", "*Duração*\n10h00"]);
 	// a linha "Comprar" do voo com cartão sai do texto; o resto fica, e os botões de próximo passo vêm no fim
-	const montada = blocosDaResposta(resposta, [azul, tap]);
+	// o texto fica em cima; os cartões, a planilha e os botões vão num painel com a barra dourada do Taki
+	const montada = blocosDaResposta(`${resposta}\n\n:bar_chart: Planilha: <https://planilha.falsa/1|abrir os 4 voos>`, [azul, tap]);
 	assert.equal(montada.texto, "O mais barato é a *R$ 2.067* na Azul, no dom, 15/11.\n\nSe quiser direto, a TAP sai por R$ 4.789.");
-	assert.deepEqual(montada.blocos.map((bloco: any) => bloco.type), ["section", "section", "section", "actions"]);
-	assert.deepEqual((montada.blocos.at(-1) as any).elements.map((botao: any) => botao.action_id), ["frase_0", "frase_1", "frase_2"]);
+	assert.deepEqual(montada.blocos.map((bloco: any) => bloco.type), ["section"]);
+	assert.equal(montada.painel.color, "#F2A93B");
+	assert.deepEqual(montada.painel.blocks.map((bloco: any) => bloco.type), ["section", "divider", "section", "context", "actions"]);
+	assert.deepEqual(montada.painel.blocks.filter((bloco: any) => bloco.type === "section").map((bloco: any) => bloco.text.text), ["*R$ 2.067*  ·  Azul   💰 Mais barato", "*R$ 4.789*  ·  TAP Air Portugal   ⚡ Mais rápido"]);
+	assert.match((montada.painel.blocks[3] as any).elements[0].text, /^:bar_chart: Planilha: /);
+	assert.deepEqual((montada.painel.blocks.at(-1) as any).elements.map((botao: any) => botao.action_id), ["frase_0", "frase_1", "frase_2"]);
+	assert.equal(blocosDaResposta(resposta, [azul]).painel.blocks[0].text.text, "*R$ 2.067*  ·  Azul");    // um voo só: sem rótulo
 
 	// no canal: com voos citados, a resposta vai com os cartões; se o Slack recusar, vai a resposta inteira, com o link
-	const mandadas: { text: string; blocks?: any[] }[] = [];
+	const mandadas: { text: string; blocks?: any[]; attachments?: any[] }[] = [];
 	let recusar = false;
-	const saidaComBlocos = { dizer: async (_canal: string, mensagem: { text: string; blocks?: any[] }) => { if (recusar && mensagem.blocks?.some((bloco) => bloco.accessory)) throw new Error("invalid_blocks"); mandadas.push(mensagem); return "m"; }, editar: async () => {}, apagar: async () => {} };
+	const saidaComBlocos = { dizer: async (_canal: string, mensagem: { text: string; blocks?: any[]; attachments?: any[] }) => { if (recusar && mensagem.attachments) throw new Error("invalid_attachments"); mandadas.push(mensagem); return "m"; }, editar: async () => {}, apagar: async () => {} };
 	const canaisComCartoes = criarCanais(saidaComBlocos, { responder: async () => resposta, relogio: { depois: (_ms: number, fazer: () => void) => (queueMicrotask(fazer), () => {}) }, voosDaConversa: async () => [azul, tap] });
 	await canaisComCartoes.receber("falso-cartoes", "o mais barato de Salvador para Portugal");
 	await canaisComCartoes.vazio("falso-cartoes");
 	const comCartoes = mandadas.at(-1)!;
-	assert.equal(comCartoes.blocks!.filter((bloco) => bloco.accessory).length, 2);
-	assert.deepEqual(comCartoes.blocks!.slice(-2).map((bloco) => bloco.type), ["actions", "divider"]);
+	assert.equal(comCartoes.attachments![0].blocks.filter((bloco: any) => bloco.accessory).length, 2);
+	assert.equal(comCartoes.attachments![0].blocks.at(-1).type, "actions");
 	recusar = true;
 	await canaisComCartoes.receber("falso-cartoes", "de novo");
 	await canaisComCartoes.vazio("falso-cartoes");
