@@ -35,6 +35,14 @@ function horarios(texto: string) {
 	return [...texto.matchAll(/\b(\d{1,2}):(\d{2})\b/g)].map((achado) => achado[1].padStart(2, "0") + ":" + achado[2]);
 }
 
+// "19 °C", "19°", "19 graus": temperatura também é número de fora, e um modelo fraco arredonda ou inventa.
+// O º (de 1º, 2º) não entra: é ordinal. °F também não: o clima chega em Celsius. O menos só vale solto
+// ("-3 °C"), nunca no meio de um intervalo ("18-20 °C"). Decimal vira inteiro, como no clima.
+function temperaturas(texto: string) {
+	return [...texto.matchAll(/(?<![\d.,])(?:(?<=^|[\s(])(-))?(\d{1,3}(?:[.,]\d+)?)\s*(?:°(?!\s*F)\s*C?|graus\b)/gi)]
+		.map((achado) => Math.round(Number(achado[2].replace(",", "."))) * (achado[1] ? -1 : 1));
+}
+
 function enderecos(texto: string) {
 	return [...texto.matchAll(/https?:\/\/[^\s<>|)"'*]+/g)].map((achado) => achado[0].replace(/[.,;:]$/, ""));
 }
@@ -53,8 +61,10 @@ export function escreveuChamada(texto: string) {
 const FALA_DO_USUARIO = /or[çc]amento|limite|at[ée]\s|dentro de|cupom|desconto|voc[êe] (tem|disse|falou|mencionou|informou)|seu amigo|n[ãa]o (posso|consigo|confirmo|[ée]|custa)|menos de|abaixo|acima|budget|under/i;
 
 // fatos: tudo o que veio das ferramentas. links: endereços que vieram das ferramentas e do bot. doUsuario: o que a pessoa escreveu.
+// daWeb: o texto das páginas da internet (buscar_na_web). Ele vale para duração, horário e temperatura, mas NUNCA para
+// preço em R$: uma página com "R$ 89", ou mesmo com "3000 metros", liberaria um preço inventado.
 // Devolve a lista de problemas, cada um escrito como uma instrução para o modelo corrigir. Vazia = aprovada.
-export function verificarResposta(texto: string, fatos: string, links: string, doUsuario = "") {
+export function verificarResposta(texto: string, fatos: string, links: string, doUsuario = "", daWeb = "") {
 	const problemas: string[] = [];
 
 	if (texto.trim() === "") return ["A resposta veio vazia. Escreva a resposta para o usuário."];
@@ -99,7 +109,7 @@ export function verificarResposta(texto: string, fatos: string, links: string, d
 		}
 	}
 
-	const duracoesDosFatos = new Set(duracoesEmMinutos(fatos + "\n" + doUsuario));
+	const duracoesDosFatos = new Set(duracoesEmMinutos(fatos + "\n" + doUsuario + "\n" + daWeb));
 	for (const minutos of duracoesEmMinutos(texto)) {
 		if (!duracoesDosFatos.has(minutos)) {
 			const escrita = `${Math.floor(minutos / 60)}h${String(minutos % 60).padStart(2, "0")}`;
@@ -107,9 +117,15 @@ export function verificarResposta(texto: string, fatos: string, links: string, d
 		}
 	}
 
-	const horariosDosFatos = new Set(horarios(fatos + "\n" + doUsuario));
+	const horariosDosFatos = new Set(horarios(fatos + "\n" + doUsuario + "\n" + daWeb));
 	for (const horario of horarios(texto)) {
 		if (!horariosDosFatos.has(horario)) problemas.push(`O horário ${horario} não veio de nenhuma ferramenta.`);
+	}
+
+	// a temperatura que a pessoa escreveu ("vai fazer 30 graus?") pode ser repetida para responder a ela
+	const temperaturasDosFatos = new Set(temperaturas(fatos + "\n" + daWeb + "\n" + doUsuario));
+	for (const graus of temperaturas(texto)) {
+		if (!temperaturasDosFatos.has(graus)) problemas.push(`A temperatura ${graus} °C não veio de nenhuma ferramenta. Copie a temperatura exatamente como veio.`);
 	}
 
 	for (const endereco of enderecos(texto)) {

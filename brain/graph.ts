@@ -8,7 +8,7 @@
 //
 //   contexto (agente de contexto): quando 20 mensagens saíram da janela de 40, o modelo barato atualiza o resumo
 //     e resumoLimpo() tira preço, horário e link. O resumo vai nas instruções do orquestrador, especialistas e redator
-//   especialistas (memoria, monitor, pesquisador, analista): cada um repete "modelo ⇄ ferramentas" até terminar a sua tarefa
+//   especialistas (memoria, monitor, pesquisador, analista, guia): cada um repete "modelo ⇄ ferramentas" até terminar a sua tarefa
 //     e volta ao orquestrador. "pronto" só vale se terminou() confirmar no código que uma ferramenta da tarefa respondeu.
 //   orquestrador: chama o modelo no começo do pedido e quando alguém volta sem terminar (refaz o plano, até 2 vezes);
 //     quem volta tendo terminado só libera o próximo do plano, sem chamada de modelo
@@ -324,13 +324,24 @@ function mensagensDoPedido(mensagens: BaseMessage[]) {
 
 // ---------- O QUE CONTA COMO FATO ----------
 // só o retorno de uma ferramenta, mais o que já está pesquisado. Serve ao verificador e ao recado.
+// O texto das páginas da internet fica à parte (textoDaWeb): ele não pode provar preço em R$.
+function respostasDasFerramentas(estado: typeof Estado.State, daWeb: boolean) {
+	const pedido = mensagensDoPedido(estado.messages);
+	const naWeb = new Set(pedido.flatMap((mensagem) => ((mensagem as AIMessage).tool_calls ?? []).filter((chamada) => chamada.name === "buscar_na_web").map((chamada) => chamada.id)));
+	return pedido.filter((mensagem) => mensagem.getType() === "tool" && naWeb.has((mensagem as ToolMessage).tool_call_id) === daWeb).map((mensagem) => mensagem.text);
+}
+
 function fatosDoPedido(estado: typeof Estado.State) {
-	const retornos = mensagensDoPedido(estado.messages).filter((mensagem) => mensagem.getType() === "tool").map((mensagem) => mensagem.text);
-	return [...retornos, ...estado.voos.map(descreverVoo), REGRA_DO_CUSTO_BENEFICIO].join("\n");
+	return [...respostasDasFerramentas(estado, false), ...estado.voos.map(descreverVoo), REGRA_DO_CUSTO_BENEFICIO].join("\n");
+}
+
+function textoDaWeb(estado: typeof Estado.State) {
+	return respostasDasFerramentas(estado, true).join("\n");
 }
 
 // os links que valem: os que vieram de ferramenta, de mensagem do bot (como a planilha) ou de voo pesquisado.
-// Link escrito pelo usuário não vale: senão um link de golpe passaria.
+// Link escrito pelo usuário não vale: senão um link de golpe passaria. Da internet, só vale o endereço da própria
+// página achada: o texto dela chega sem link nenhum (sources/web.ts).
 function linksDaConversa(mensagens: BaseMessage[], voos: Voo[]) {
 	return [...mensagens.filter((mensagem) => mensagem.getType() !== "human").map((mensagem) => mensagem.text), ...voos.map((voo) => voo.link)].join("\n");
 }
@@ -339,7 +350,7 @@ function linksDaConversa(mensagens: BaseMessage[], voos: Voo[]) {
 // final: sem isto, um preço inventado na nota de um especialista vira fato na boca do redator.
 function recadoConferido(nome: string, recado: string, estado: typeof Estado.State) {
 	const fatos = fatosDoPedido(estado);
-	const problemas = verificarResposta(recado, fatos, linksDaConversa(estado.messages, estado.voos), textosDoUsuario(estado.messages).join("\n"));
+	const problemas = verificarResposta(recado, fatos, linksDaConversa(estado.messages, estado.voos), textosDoUsuario(estado.messages).join("\n"), textoDaWeb(estado));
 	if (problemas.length === 0) return recado;
 	console.log(`[${nome}] recado recusado: ${problemas.join(" / ")}`);
 	return "não terminou: a nota deste especialista trouxe dado que não veio de ferramenta, e foi descartada";
@@ -614,7 +625,7 @@ function noVerificar(estado: typeof Estado.State, config: LangGraphRunnableConfi
 	const doUsuario = textosDoUsuario(estado.messages).join("\n");
 	const links = linksDaConversa(anteriores, estado.voos);
 
-	const problemas = verificarResposta(texto, fatos, links, doUsuario);
+	const problemas = verificarResposta(texto, fatos, links, doUsuario, textoDaWeb(estado));
 	if (problemas.length === 0) return { messages: [new AIMessage({ id: ultima.id, content: texto })] };
 
 	console.log(`[verificador] recusou (${estado.tentativas + 1}): ${problemas.join(" / ")}`);
@@ -697,7 +708,7 @@ function depoisDeVerificar(estado: typeof Estado.State) {
 // o SqliteSaver guarda a pasta num arquivo depois de cada nó: é a memória que sobrevive ao Ctrl+C
 const memoria = SqliteSaver.fromConnString(process.env.MEMORIA ?? import.meta.dirname + "/../data/memoria.sqlite");
 
-const ESPECIALISTAS = ["memoria", "monitor", "pesquisador", "analista"] as const;
+const ESPECIALISTAS = ["memoria", "monitor", "pesquisador", "analista", "guia"] as const;
 const CAMINHOS_DO_ORQUESTRADOR = [...ESPECIALISTAS, "conferir", "situacao"] as const;
 const CAMINHOS_DO_ESPECIALISTA = [...ESPECIALISTAS, "ferramentas", "orquestrador"] as const;
 const CAMINHOS_DAS_FERRAMENTAS = [...ESPECIALISTAS, "orquestrador"] as const;
@@ -712,6 +723,7 @@ export const grafo = new StateGraph(Estado)
 	.addNode("monitor", criarEspecialista("monitor"))
 	.addNode("pesquisador", criarEspecialista("pesquisador"))
 	.addNode("analista", criarEspecialista("analista"))
+	.addNode("guia", criarEspecialista("guia"))    // clima e internet: as dúvidas de viagem que não são preço
 	.addNode("ferramentas", noFerramentas)
 	.addNode("conferir", noConferir)
 	.addNode("situacao", noSituacao)
@@ -727,6 +739,7 @@ export const grafo = new StateGraph(Estado)
 	.addConditionalEdges("monitor", depoisDoEspecialista, [...CAMINHOS_DO_ESPECIALISTA])
 	.addConditionalEdges("pesquisador", depoisDoEspecialista, [...CAMINHOS_DO_ESPECIALISTA])
 	.addConditionalEdges("analista", depoisDoEspecialista, [...CAMINHOS_DO_ESPECIALISTA])
+	.addConditionalEdges("guia", depoisDoEspecialista, [...CAMINHOS_DO_ESPECIALISTA])
 	.addConditionalEdges("ferramentas", depoisDasFerramentas, [...CAMINHOS_DAS_FERRAMENTAS])
 	.addEdge("conferir", "redator")
 	.addEdge("situacao", "redator")
@@ -752,11 +765,13 @@ export function descreverChamada(chamada: { name: string; args: Record<string, a
 	if (chamada.name.includes("monitoramento")) return ":eyes: Olhando seus monitoramentos...";
 	if (chamada.name.startsWith("guardar_")) return ":memo: Anotando o que você me contou...";
 	if (chamada.name.includes("preferencia")) return ":memo: Olhando o que eu tenho anotado...";
+	if (chamada.name === "ver_clima") return `:partly_sunny: Vendo o tempo em ${cidade}...`;
+	if (chamada.name === "buscar_na_web") return `:globe_with_meridians: Procurando na internet: ${String(chamada.args.pergunta ?? "").slice(0, 80)}...`;
 	return ":bar_chart: Comparando os voos...";
 }
 
 // o stream avisa quando um nó TERMINA: a frase diz o que começa depois dele. Nó sem frase não muda o aviso
-const DEPOIS_DO_PLANO: Record<string, string> = { pesquisador: ":mag: Indo atrás dos voos...", analista: ":bar_chart: Comparando os voos...", monitor: ":eyes: Cuidando do monitoramento...", memoria: ":memo: Anotando..." };
+const DEPOIS_DO_PLANO: Record<string, string> = { pesquisador: ":mag: Indo atrás dos voos...", analista: ":bar_chart: Comparando os voos...", monitor: ":eyes: Cuidando do monitoramento...", memoria: ":memo: Anotando...", guia: ":globe_with_meridians: Indo atrás da informação..." };
 export function descreverPasso(no: string, resultado: any) {
 	if (no === "orquestrador") return DEPOIS_DO_PLANO[resultado?.plano?.[0]] ?? "";
 	if (no === "conferir" || no === "situacao") return ":pencil2: Escrevendo a resposta...";
