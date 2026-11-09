@@ -24,7 +24,8 @@ import { horas } from "../sources/spreadsheet.ts";
 
 // ---------- A SAÍDA ----------
 // dizer devolve o id da mensagem (o "ts" do Slack), para editar e apagar o aviso de progresso depois
-export type Mensagem = { text: string; blocks?: unknown[] };
+// attachments: o painel dos cartões de voo, com a barra colorida do lado (blocos do Slack não têm borda)
+export type Mensagem = { text: string; blocks?: unknown[]; attachments?: unknown[] };
 export type Saida = {
 	dizer(canal: string, mensagem: Mensagem): Promise<string | undefined>;
 	editar(canal: string, id: string, texto: string): Promise<unknown>;
@@ -115,14 +116,26 @@ export function voosCitados(voos: Voo[], texto: string) {
 	return citados;
 }
 
-export function cartaoDoVoo(voo: Voo, indice: number) {
-	const dia = `${diaDaSemana(voo.data).slice(0, 3)}, ${voo.data.slice(8, 10)}/${voo.data.slice(5, 7)}`;
+// rótulo: o mais barato e o mais rápido entre os voos do painel (só quando há mais de um para comparar)
+export function cartaoDoVoo(voo: Voo, indice: number, rotulo = "") {
+	const diaMes = `${voo.data.slice(8, 10)}/${voo.data.slice(5, 7)}`;
+	const dia = `${diaDaSemana(voo.data).slice(0, 3)}, ${diaMes}`;
 	const escalas = voo.escalas === 0 ? "direto" : `${voo.escalas} escala${voo.escalas > 1 ? "s" : ""}`;
+	const chegada = voo.chegada.startsWith(diaMes + " ") ? voo.chegada.slice(6) : voo.chegada;    // no mesmo dia, só a hora
+	const campo = (nome: string, valor: string) => ({ type: "mrkdwn", text: `*${nome}*\n${valor}` });
 	return {
 		type: "section",
-		text: { type: "mrkdwn", text: `*${reais(voo.preco)}* · ${voo.companhia}\n${dia} · ${voo.origem} ${voo.saida} → ${voo.destino} ${voo.chegada}\n${escalas} · ${horas(voo.duracao_min)}` },
+		text: { type: "mrkdwn", text: `*${reais(voo.preco)}*  ·  ${voo.companhia}${rotulo ? `   ${rotulo}` : ""}` },
+		fields: [campo("Quando", dia), campo("Trajeto", `${voo.origem} ${voo.saida} → ${voo.destino} ${chegada}`), campo("Escalas", escalas), campo("Duração", horas(voo.duracao_min))],
 		accessory: { type: "button", action_id: `comprar_${indice}`, text: { type: "plain_text", text: "Comprar" }, url: voo.link },
 	};
+}
+
+function rotulos(voos: Voo[]) {
+	if (voos.length < 2) return voos.map(() => "");
+	const barato = voos.reduce((a, b) => (b.preco < a.preco ? b : a));
+	const rapido = voos.reduce((a, b) => (b.duracao_min < a.duracao_min ? b : a));
+	return voos.map((voo) => [voo === barato ? "💰 Mais barato" : "", voo === rapido ? "⚡ Mais rápido" : ""].filter(Boolean).join("  "));
 }
 
 // clicar num botão de frase vale como mandar a frase (bot.ts, app.action). Precisa da Interactivity ligada no app
@@ -136,10 +149,17 @@ const botoesDeFrase = (frases: string[][]) => ({
 	elements: frases.map(([rotulo, frase], indice) => ({ type: "button", action_id: `frase_${indice}`, value: frase, text: { type: "plain_text", text: rotulo } })),
 });
 
-// a linha "Comprar: <link|ver no Google Voos>" sai do texto quando o cartão do mesmo voo já tem o botão
+// o texto fica em cima; embaixo, um painel com a barra dourada do Taki: os cartões, a planilha e os botões de próximo passo.
+// A linha "Comprar: <link>" do voo que tem cartão sai do texto (o botão faz isso), e a da planilha vai para o pé do painel
+const COR_DO_TAKI = "#F2A93B";
 export function blocosDaResposta(texto: string, voos: Voo[]) {
-	const semComprar = texto.split("\n").filter((linha) => !(/comprar/i.test(linha) && voos.some((voo) => linha.includes(voo.link)))).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-	return { texto: semComprar, blocos: [...emSecoes(semComprar), ...voos.map(cartaoDoVoo), botoesDeFrase(PROXIMOS_PASSOS)] };
+	const linhas = texto.split("\n");
+	const daPlanilha = (linha: string) => /^:bar_chart: Planilhas?:/.test(linha.trim());
+	const corpo = linhas.filter((linha) => !daPlanilha(linha) && !(/comprar/i.test(linha) && voos.some((voo) => linha.includes(voo.link)))).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+	const planilhas = linhas.filter(daPlanilha).map((linha) => ({ type: "context", elements: [{ type: "mrkdwn", text: linha.trim() }] }));
+	const nomes = rotulos(voos);
+	const cartoes = voos.flatMap((voo, indice) => [...(indice > 0 ? [{ type: "divider" }] : []), cartaoDoVoo(voo, indice, nomes[indice])]);
+	return { texto: corpo, blocos: emSecoes(corpo), painel: { color: COR_DO_TAKI, blocks: [...cartoes, ...planilhas, botoesDeFrase(PROXIMOS_PASSOS)] } };
 }
 
 // ---------- BOAS-VINDAS E A ABA HOME ----------
@@ -313,8 +333,9 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 			const voos = voosCitados(await voosDaConversa(canal).catch(() => []), resposta);
 			if (voos.length === 0) await comLinhaOuTexto(canal, resposta);
 			else {
-				const { texto, blocos } = blocosDaResposta(resposta, voos);
-				await saida.dizer(canal, comLinha(texto, blocos)).catch((erro) => {
+				// sem a linha do fim: o painel com a barra já separa esta resposta da próxima
+				const { texto, blocos, painel } = blocosDaResposta(resposta, voos);
+				await saida.dizer(canal, { text: texto, blocks: blocos, attachments: [painel] }).catch((erro) => {
 					console.log(`[canal] o Slack recusou os cartões (${erro?.message}): mando só o texto`);
 					return saida.dizer(canal, { text: resposta });
 				});
