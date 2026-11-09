@@ -1329,6 +1329,10 @@ assert.equal(
 	"A pessoa mora em Recife e quer ir a Lisboa em 12/12. Prefere voo direto.",
 );
 assert.equal(resumoLimpo("Viaja com a filha. Pagaria US$ 500. Ou 300 euros. O total deu 2.810. O passaporte vence em março."), "Viaja com a filha.");
+// 09/11: o resumo de 800 letras acabava em "Está e" no "contexto" do Slack. Agora para na última frase inteira
+const resumoLongo = resumoLimpo(Array.from({ length: 30 }, (_, i) => `Quer ir a Natal no dia ${i + 1} de dezembro com a família.`).join(" "));
+assert.ok(resumoLongo.length <= 800 && resumoLongo.endsWith("família."), resumoLongo.slice(-40));
+assert.equal(resumoLimpo("x".repeat(900) + "."), "x".repeat(800));
 
 // Assim que uma mensagem sai da janela de 40 sem estar no resumo, ele resume as que saíram e as 20 seguintes:
 // nada fica no buraco, e a próxima chamada só vem depois de mais 20 mensagens
@@ -1657,7 +1661,7 @@ servicos.atualizarPlanilha = planilhaDeAntes;
 
 // ---------- VER, COMPACTAR E EXCLUIR O CONTEXTO ----------
 const { compactar, retratoDaConversa, retratoParaSlack } = await import("../brain/context.ts");
-const { blocosDoContexto, comandoDeContexto, criarCanais, FAREJANDO: FAREJANDO_DO_CANAL } = await import("../brain/channel.ts");
+const { blocosDoContexto, comandoDeContexto, criarCanais, emSecoes, FAREJANDO: FAREJANDO_DO_CANAL } = await import("../brain/channel.ts");
 // só o texto exato vira ação: um pedido de viagem com a palavra no meio segue para o grafo
 assert.equal(comandoDeContexto("contexto"), "ver");
 assert.equal(comandoDeContexto("  Contexto! "), "ver");
@@ -1709,6 +1713,20 @@ assert.ok(ditas.at(-1)!.blocks);
 await canaisFalsos.receber(doContexto, "quero limpar o contexto da viagem pra Roma");
 await canaisFalsos.vazio(doContexto);
 assert.deepEqual(pedidosAoGrafo, ["quero limpar o contexto da viagem pra Roma"]);
+// 09/11: toda mensagem do bot termina numa linha, para respostas seguidas não ficarem empilhadas no Slack
+assert.equal(ditas.at(-1)!.text, "resposta do grafo");
+assert.deepEqual((ditas.at(-1)!.blocks as any[]).map((bloco) => bloco.type), ["section", "divider"]);
+// o Slack recusando os blocos, a resposta vai só em texto
+const soTexto: { text: string; blocks?: unknown[] }[] = [];
+const canaisSemBlocos = criarCanais({ dizer: async (_canal: string, mensagem: { text: string; blocks?: unknown[] }) => { if (mensagem.blocks) throw new Error("invalid_blocks"); soTexto.push(mensagem); return "m"; }, editar: async () => {}, apagar: async () => {} }, { responder: async () => "resposta sem blocos", relogio: relogioJa });
+await canaisSemBlocos.receber("canal-sem-blocos", "voos para Natal");
+await canaisSemBlocos.vazio("canal-sem-blocos");
+assert.deepEqual(soTexto.map((mensagem) => mensagem.text).filter((texto) => texto !== FAREJANDO_DO_CANAL), ["resposta sem blocos"]);
+// resposta maior que uma seção do Slack (3000 letras) vira várias, quebradas numa linha, sem perder nada
+const textoGrande = Array.from({ length: 120 }, (_, i) => `linha ${i} ${"a".repeat(40)}`).join("\n");
+const secoesGrandes = emSecoes(textoGrande);
+assert.ok(secoesGrandes.length > 1 && secoesGrandes.every((secao) => secao.text.text.length <= 2900));
+assert.equal(secoesGrandes.map((secao) => secao.text.text).join("\n"), textoGrande);
 
 // compactar: o resumo passa pelo resumoLimpo, só "prefere voo direto" fica (o "mora em Recife" a pessoa mandou esquecer),
 // ficam as últimas mensagens e os voos, e o painel avisa

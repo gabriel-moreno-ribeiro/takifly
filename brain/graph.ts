@@ -198,9 +198,16 @@ export async function noContexto(estado: typeof Estado.State) {
 // ou documento sai inteira. Documento mora no dossiê, não em texto que vai para todos os prompts e para o Langfuse.
 const FORA_DO_RESUMO = /\$|€|£|\b(reais|real|euros?|dolar|dolares|libras?)\b|\d{1,3}(?:\.\d{3})+|\d{1,2}\s*(?::|h)\s*\d{2}|\d+\s*(?:horas?|min)\b|https?:\/\/|passaporte|nascimento|nasceu|vacina|visto|\bcpf\b|\brg\b/i;
 
+// o resumo para na última frase inteira que cabe em 800 letras: frase cortada no meio ("Está e") vira meia informação
 export function resumoLimpo(texto: string) {
-	const frases = texto.split(/(?<=[.!?])\s+|\n+/);
-	return frases.filter((frase) => !FORA_DO_RESUMO.test(semAcento(frase))).join(" ").trim().slice(0, 800);
+	const frases = texto.split(/(?<=[.!?])\s+|\n+/).map((frase) => frase.trim()).filter((frase) => frase && !FORA_DO_RESUMO.test(semAcento(frase)));
+	let resumo = "";
+	for (const frase of frases) {
+		const junto = resumo ? `${resumo} ${frase}` : frase;
+		if (junto.length > 800) return resumo || frase.slice(0, 800);    // uma frase só maior que o limite: melhor cortada que nada
+		resumo = junto;
+	}
+	return resumo;
 }
 
 // ---------- NÓ: LEMBRAR (o agente de memória) ----------

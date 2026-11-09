@@ -46,7 +46,7 @@ export function comandoDeContexto(texto: string): Comando | null {
 export function blocosDoContexto(texto: string) {
 	const botao = (acao: string, rotulo: string) => ({ type: "button", action_id: `contexto_${acao}`, value: acao, text: { type: "plain_text", text: rotulo } });
 	return [
-		{ type: "section", text: { type: "mrkdwn", text: texto.slice(0, 2900) } },    // o Slack recusa seção com mais de 3000 letras
+		...emSecoes(texto),
 		{
 			type: "actions",
 			elements: [
@@ -65,6 +65,25 @@ export function blocosDoContexto(texto: string) {
 			],
 		},
 	];
+}
+
+// ---------- A LINHA NO FIM ----------
+// cada mensagem do bot termina numa linha (o bloco "divider" do Slack): sem ela, mensagens seguidas do bot
+// ficam empilhadas e não se vê onde uma acaba. O texto vai em seções de até 2900 letras (o Slack recusa mais
+// de 3000 numa seção), quebradas numa linha, e continua em "text" para a notificação.
+export function emSecoes(texto: string) {
+	const secoes: { type: "section"; text: { type: "mrkdwn"; text: string } }[] = [];
+	let resto = texto;
+	while (resto) {
+		const quebra = resto.length <= 2900 ? resto.length : resto.lastIndexOf("\n", 2900) > 0 ? resto.lastIndexOf("\n", 2900) : 2900;
+		secoes.push({ type: "section", text: { type: "mrkdwn", text: resto.slice(0, quebra) } });
+		resto = resto.slice(quebra).replace(/^\n/, "");
+	}
+	return secoes;
+}
+
+export function comLinha(texto: string, blocos: unknown[] = emSecoes(texto)): Mensagem {
+	return { text: texto, blocks: [...blocos, { type: "divider" }] };
 }
 
 // ---------- OS CANAIS ----------
@@ -116,7 +135,12 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 		if (!canais.has(canal)) canais.set(canal, { fila: [], trabalhando: false, trabalho: Promise.resolve(), atual: null, chegando: [], pararCronometro: null, decidindo: Promise.resolve() });
 		return canais.get(canal)!;
 	};
-	const dizer = (canal: string, text: string) => saida.dizer(canal, { text }).catch(console.log);
+	// se o Slack recusar os blocos, a mensagem vai só em texto: a linha é enfeite, a pessoa não pode ficar sem a resposta
+	const comLinhaOuTexto = (canal: string, text: string, blocos?: unknown[]) => saida.dizer(canal, comLinha(text, blocos)).catch((erro) => {
+		console.log(`[canal] o Slack recusou os blocos (${erro?.message}): mando só o texto`);
+		return saida.dizer(canal, { text });
+	});
+	const dizer = (canal: string, text: string) => comLinhaOuTexto(canal, text).catch(console.log);
 
 	// trabalhando vira falso no mesmo instante em que a fila fica vazia: assim uma tarefa que chega logo depois nunca fica parada
 	function enfileirar(canal: string, tarefa: Tarefa, naFrente = false) {
@@ -155,7 +179,7 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 			if (sinal.aborted) return;
 			tarefa.fase = "respondendo";
 			console.log("O bot respondeu: " + resposta);
-			await saida.dizer(canal, { text: resposta });
+			await comLinhaOuTexto(canal, resposta);
 		} catch (erro: any) {
 			if (sinal.aborted) return console.log(`[canal] pedido cancelado: ${tarefa.textos.join(" / ").slice(0, 100)}`);
 			console.log("Deu erro: ", erro);    // o erro técnico fica no log; a pessoa lê o que aconteceu e o que fazer
@@ -248,10 +272,7 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 	// Se o Slack recusar os botões, o retrato vai só em texto: a pessoa não pode ficar sem ele
 	async function verContexto(canal: string) {
 		const texto = retratoParaSlack(await retratoDaConversa(canal));
-		await saida.dizer(canal, { text: texto, blocks: blocosDoContexto(texto) }).catch((erro) => {
-			console.log(`[contexto] o Slack recusou os botões (${erro?.message}): mando só o texto`);
-			return saida.dizer(canal, { text: texto });
-		});
+		await comLinhaOuTexto(canal, texto, blocosDoContexto(texto));
 	}
 
 	// compactar espera a fila: com outra coisa rodando, a pessoa fica sabendo que entrou
