@@ -1,7 +1,7 @@
 // brain/channel.ts - o que o bot faz com as mensagens de cada canal, sem saber que é o Slack
 //
 // O bot.ts só liga isto ao Slack (dizer, editar e apagar mensagem, e os botões). Aqui mora a ordem das coisas:
-//   - mensagens seguidas esperam 5 s de silêncio e viram um pedido só; com um pedido rodando, um juiz decide se a
+//   - mensagens seguidas esperam 2 s de silêncio e viram um pedido só; com um pedido rodando, um juiz decide se a
 //     mensagem nova refaz o pedido, espera na fila ou não pede nada (veja OS CANAIS, abaixo);
 //   - um trabalho por vez em cada canal (um pedido para o grafo, ou compactar e excluir o contexto): dois ao mesmo
 //     tempo escreveriam no mesmo checkpoint e um apagaria o que o outro escreveu;
@@ -95,7 +95,7 @@ export function comLinha(texto: string, blocos: unknown[] = emSecoes(texto)): Me
 //   fila: outro assunto. O pedido termina e o lote vem depois, com o "Peguei";
 //   ignorar_espera: "ok", "valeu". Nada muda.
 // Juiz que quebra ou demora vale fila: é o que o bot fazia antes, e nunca perde mensagem.
-export const ESPERA_POR_MAIS = 5_000;    // quanto silêncio fecha um lote de mensagens
+export const ESPERA_POR_MAIS = 2_000;    // quanto silêncio fecha um lote de mensagens (era 5 s até 09/11: a pessoa achou lento)
 export const PRAZO_DO_JUIZ = 8_000;      // depois disso, sem decisão do juiz, vale fila
 export const REFAZENDO = ":taki: Vi que você mudou o pedido. Refaço com a mensagem nova junto.";
 
@@ -113,7 +113,7 @@ type EstadoDoCanal = {
 	decidindo: Promise<void>;                // um lote decide de cada vez: dois juízes ao mesmo tempo poderiam cancelar o mesmo pedido
 };
 
-// o relógio que o teste troca: assim ele não espera 5 s de verdade
+// o relógio que o teste troca: assim ele não espera de verdade
 export type Relogio = { depois(ms: number, fazer: () => void): () => void };
 const relogioDeVerdade: Relogio = {
 	depois(ms, fazer) {

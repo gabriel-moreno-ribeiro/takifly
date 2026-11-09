@@ -12,6 +12,7 @@ stale_after: 2026-11-11T00:00:00Z
 
 - **F74 (`passing`)**: "voo de Salvador para a Alemanha em dezembro ou janeiro, o que estiver mais barato" travava no Slack (país não é cidade, mês não é dia, e o bot recusou a semana que ele mesmo propôs). A ferramenta `buscar_mais_barato` (`brain/tools.ts`) lê o calendário de preços do Google (`buscarCalendario` em `sources/flights.ts`, uma chamada por rota cobre até uns 4 meses) e confere os dois dias mais baratos na busca de verdade. Com o Google de verdade, a Alemanha (22 aeroportos) leva uns 2 a 2,5 min. Prova de 09/11: 10 de 10 nos cenários `calendario-*` e nos vizinhos de data; os 12 `monitor-*` passaram. O revisor achou 10 problemas (o grave: o verificador não reconhecia a falha do calendário); todos consertados, com teste.
 - **No ar antes, no mesmo dia**: linha (`divider`) no fim de cada mensagem do bot e o resumo que para na última frase inteira (PR #9).
+- **Espera das mensagens seguidas (F73) de 5 s para 2 s** (`ESPERA_POR_MAIS` em `brain/channel.ts`), a pedido: 5 s deixava toda resposta lenta.
 - **Próximo passo**: ver no Slack um pedido de verdade do F74. Se 2 min for demais para país grande, fazer os calendários em paralelo (com cuidado com o 429 do Google).
 
 # Madrugada 08→09/11
