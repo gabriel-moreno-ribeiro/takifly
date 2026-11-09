@@ -14,11 +14,12 @@ Trabalho sozinho, a pedido da pessoa, na branch `gabriel-moreno-ribeiro/madrugad
 
 ## Próximo passo
 
-F72 ativo. Já existem, sem commit: `brain/context.ts` (retrato, compactar, excluir), `brain/channel.ts` (fila do canal e os comandos `contexto`, `compactar contexto`, `excluir contexto`), `bot.ts` ligado ao `brain/channel.ts` com os botões, e as rotas `/conversas` em `brain/live.ts` e `brain/live.html`. Falta o bloco "VER, COMPACTAR E EXCLUIR O CONTEXTO" em `quality/tests.ts`, depois o revisor e o `verify-feature.ts F72`.
+F73 ativo. O prompt e o formato do juiz já estão em `brain/agents.ts` (`INSTRUCOES_DO_JUIZ`, `Decisao`). Falta: o debounce, o juiz e o cancelamento em `brain/channel.ts` (`criarCanais`, com um relógio que o teste troca), o `AbortSignal` em `rodar()` e `responder()` de `brain/graph.ts` (e desfazer o pedido cancelado no checkpointer), a faixa no desenho de `brain/live.html`, e o bloco "VÁRIAS MENSAGENS SEGUIDAS" em `quality/tests.ts` (há um rascunho do relógio falso em `/tmp/madrugada/testes_f73.ts.txt`, se ainda existir). O excluir com pedido rodando passa a cancelar o pedido, em vez de recusar.
 
 ## O que ficou pronto
 
-- F71: a mesma viagem entre duas cidades fica numa planilha só por conversa (GRU→GIG e SDU→VCP são a mesma), reescrita a cada pesquisa e com no máximo 100 voos. Commit "Planilha por par de cidades, com no máximo 100 voos (F71)".
+- F71: a mesma viagem entre duas cidades fica numa planilha só por conversa (GRU→GIG e SDU→VCP são a mesma), reescrita a cada pesquisa e com no máximo 100 voos. Commit `7f83e0f`.
+- F72: `contexto` no Slack e no painel mostra o que o bot lembra da conversa; `compactar contexto` e `excluir contexto` (e os botões) resumem ou apagam, guardando antes as preferências. Commit "Ver, compactar e excluir o contexto (F72)".
 
 ## O que travou
 
@@ -31,6 +32,13 @@ F72 ativo. Já existem, sem commit: `brain/context.ts` (retrato, compactar, excl
 - F71, como dizer quantos ficaram de fora sem mudar o `.gs`: uma aba a mais, "Sobre esta planilha", com uma linha. Aba que ficaria vazia (por exemplo, nenhum voo caro) vai com a linha "nenhum voo aqui", porque o `.gs` pula aba vazia e a lista velha ficaria lá.
 - F71, Google falhando com planilha guardada: tenta de novo uma vez; se falhar de novo, cria outra planilha e passa a usar ela (a guardada pode ter sido apagada do Drive).
 - F71, o nome do par no Slack vai no sentido da pesquisa ("São Paulo–Recife"), e a planilha guarda o título da primeira pesquisa.
+- F72, dossiê: compactar e excluir não pedem ao modelo para tirar documento da conversa. Documento continua entrando só pelo especialista memoria, quando a pessoa conta (a regra de sempre), então o dossiê fica como está.
+- F72, preferências no compactar e no excluir: o modelo lê as mensagens juntas, mas cada fato só entra se passar na conferência do agente de memória contra uma mensagem sozinha, e o lote nunca troca uma preferência guardada (ele não sabe qual mensagem é a mais nova). Fato de um valor só ("mora em", "é de", "sai de") não entra se já há um guardado. E o que a pessoa pediu para esquecer não volta.
+- F72, excluir com o modelo falhando: apaga mesmo assim (foi o que a pessoa pediu) e diz que não guardou preferências novas.
+- F72, excluir apaga a conversa inteira do `memoria.sqlite`, com os checkpoints antigos (`deleteThread`). O compactar não apaga os checkpoints antigos: as mensagens saem da memória de agora, mas continuam no histórico do arquivo.
+- F72, compactar com um pedido parado no meio (o bot caiu durante ele) é recusado: a próxima mensagem retoma o pedido, e depois dá para compactar.
+- F72, compactar e excluir pelo painel não mandam mensagem no Slack; o aviso fica só na lista do painel.
+- F72, ficam as últimas 10 mensagens depois de compactar (`MANTER_AO_COMPACTAR`), contadas como na janela: o corte começa numa mensagem da pessoa.
 
 # Estado verificado
 

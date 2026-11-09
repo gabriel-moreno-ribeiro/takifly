@@ -167,11 +167,6 @@ Regra que não pode quebrar: **o modelo não responde isso de memória.** Númer
 
 ## 10. Memória, planilha e mensagens seguidas (madrugada de 08→09/11)
 
-**10.2 Ver o contexto, compactar e excluir** (F72)
-- O quê: `contexto` no Slack (e a lista de conversas no painel) mostra o retrato de uma conversa: mensagens na janela e fora dela, resumo, preferências, dossiê e monitoramentos. `compactar contexto` resume a conversa toda com o modelo barato, guarda nas preferências o que dura e apaga as mensagens antigas. `excluir contexto` guarda o que dura e zera a conversa, mantendo monitoramentos, preferências e dossiê. Botões em Block Kit no Slack e no painel.
-- Por quê: a pessoa não vê o que o bot lembra, nem consegue começar do zero sem perder o que ensinou.
-- Onde: `brain/context.ts` (novo), `brain/channel.ts` (novo), `bot.ts` (`app.action`), `brain/live.ts` e `brain/live.html` (rotas novas, POST com `Origin` conferido).
-
 **10.3 Várias mensagens seguidas: espera, juiz e cancelar** (F73)
 - O quê: as mensagens de um canal esperam 5 s de silêncio e viram um pedido só. Mensagem que chega com um pedido rodando passa por um juiz (modelo barato): `refazer` cancela o pedido e começa de novo com tudo junto, `fila` espera o atual terminar, `ignorar_espera` não faz nada. Juiz que falha ou demora vale `fila`. O cancelamento é de verdade (`AbortSignal` até o `grafo.stream`): a resposta velha não sai, o aviso de progresso some e o pedido não é retomado.
 - Por quê: quem manda "voos para Lisboa" e logo "dia 15" hoje ganha duas pesquisas, e a primeira com a data errada.

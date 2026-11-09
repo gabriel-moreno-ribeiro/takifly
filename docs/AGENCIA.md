@@ -232,6 +232,7 @@ Pedido da pessoa para a madrugada de 08→09/11, feito sem crédito (tudo provad
 | Item | O que mudou | Onde |
 |---|---|---|
 | F71 | Uma planilha por par de cidades da conversa, sem ordem: GRU→GIG, CGH→SDU e a volta SDU→VCP são a mesma São Paulo–Rio. A cidade vem da tabela à mão de `rules/airports.ts` e, fora dela, do OurAirports. O link e os voos de cada (conversa, par) ficam na tabela `planilhas` do `dados.sqlite`; a pesquisa seguinte junta os voos novos com os de lá (o trecho pesquisado de novo troca os dele, e dia que passou sai) e reescreve a mesma planilha. Nunca passa de 100 voos: o mais barato, o mais rápido e o de melhor custo-benefício de cada trecho, depois os diretos, depois o resto; a aba "Sobre esta planilha" diz quantos ficaram de fora. Falha do Google tenta de novo uma vez, e só depois cria outra planilha. O painel mostra o link, se é nova ou reaproveitada e quantos foram cortados. O `spreadsheet.gs` não mudou | `noPlanilha` e `parDeCidades` em `brain/graph.ts`, `voosQueCabem` e `abasDaPesquisa` em `sources/spreadsheet.ts`, `cidadeDoAeroporto` em `rules/airports.ts`, `anotarNoPainel` em `brain/live.ts` |
+| F72 | Ver o contexto: `contexto` no Slack (texto exato, sem acento e caixa) responde com o retrato da conversa (mensagens na janela e fora dela, resumo, preferências, documentos, monitoramentos, voos e planilhas), montado sem modelo, com os botões "Compactar" e "Excluir" (o Excluir pede confirmação). `compactar contexto` resume a conversa toda com o modelo barato (passando pelo `resumoLimpo`), guarda nas preferências o que dura (cada fato conferido contra uma mensagem sozinha, sem trocar nada guardado) e deixa só as últimas 10 mensagens; voos ficam. `excluir contexto` guarda o que dura e apaga a conversa do checkpointer inteira; preferências, documentos, monitoramentos e planilhas ficam. Os dois esperam a fila do canal. O painel lista as conversas, mostra o retrato com os mesmos botões (POST só com o `Origin` do painel) e avisa na lista quando alguém compacta ou exclui | `brain/context.ts`, `brain/channel.ts` (a fila de cada canal, que saiu do `bot.ts`), `app.action` no `bot.ts`, rotas `/conversas` em `brain/live.ts` |
 
 ## A interface no Slack
 
@@ -246,7 +247,7 @@ O que a pessoa vê e não passa pelo modelo é código, e por isso muda de graç
 
 - **O mascote**: `assets/taki-icone.png` é o ícone do app (api.slack.com → Basic Information → Display Information) e `assets/taki-emoji.png` é o emoji `:taki:` do workspace, usado no aviso de progresso, no "Peguei" e no aviso de preço. Sem o emoji enviado ao Slack, aparece o texto `:taki:` cru.
 
-Precisam de configuração em api.slack.com e ainda não foram feitos: botões de próximo passo (Interactivity) e boas-vindas no primeiro contato (eventos `app_home_opened` e `member_joined_channel`).
+Precisam de configuração em api.slack.com: os botões "Compactar" e "Excluir" do `contexto` (F72) já existem e só funcionam com Interactivity ligada no app; botões de próximo passo e boas-vindas no primeiro contato (eventos `app_home_opened` e `member_joined_channel`) ainda não foram feitos.
 
 ## De onde vem cada dado real
 

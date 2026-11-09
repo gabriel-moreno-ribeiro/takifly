@@ -452,6 +452,8 @@
 		situacao.textContent = "trabalhando… (espera o pedido que estiver rodando terminar)";
 		try {
 			const corpo = await (await fetch(`/conversas/${encodeURIComponent(conversa)}/${qual}`, { method: "POST" })).json();
+			// a pessoa pode ter clicado em outra conversa enquanto esperava: a frase só aparece na conversa certa
+			if (escolhida !== conversa) return;
 			await mostrarRetrato(conversa);
 			document.querySelector("#retrato .botoes .estado").textContent = corpo.texto ?? corpo.erro ?? "";
 		} catch {

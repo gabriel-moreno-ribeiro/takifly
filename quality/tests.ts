@@ -36,7 +36,7 @@ process.env.MEMORIA = ":memory:";
 process.env.LANGFUSE_SECRET_KEY = "";
 const { checarMonitoramentos, paraGente } = await import("../brain/price-watch.ts");
 const { avisos: avisosDoPainel, ligarPainel, ouvinteAoVivo, resumirSaida } = await import("../brain/live.ts");
-const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, historicoLimpo, listarVoosParaPessoa, modelos, noContexto, parDeCidades, noFerramentas, noLembrar, noSituacao, regrasDaViagem, responder, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
+const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, historicoLimpo, listarConversas, listarVoosParaPessoa, modelos, noContexto, parDeCidades, noFerramentas, noLembrar, noSituacao, regrasDaViagem, responder, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
 
 // ---------- HISTÓRICO ----------
 const pergunta = new HumanMessage("oi");
@@ -1655,6 +1655,166 @@ assert.match(avisosDoPainel.filter((aviso) => aviso.conversa === "falso-pares" &
 servicos.buscarVoos = buscaDeAntes;
 servicos.atualizarPlanilha = planilhaDeAntes;
 
+// ---------- VER, COMPACTAR E EXCLUIR O CONTEXTO ----------
+const { compactar, retratoDaConversa, retratoParaSlack } = await import("../brain/context.ts");
+const { blocosDoContexto, comandoDeContexto, criarCanais } = await import("../brain/channel.ts");
+// só o texto exato vira ação: um pedido de viagem com a palavra no meio segue para o grafo
+assert.equal(comandoDeContexto("contexto"), "ver");
+assert.equal(comandoDeContexto("  Contexto! "), "ver");
+assert.equal(comandoDeContexto("Compactar   contexto"), "compactar");
+assert.equal(comandoDeContexto("EXCLUIR CONTEXTO."), "excluir");
+for (const frase of ["quero limpar o contexto da viagem pra Roma", "contexto da viagem", "excluir", "me explica o contexto", "compactar"]) assert.equal(comandoDeContexto(frase), null, frase);
+
+// uma conversa falsa montada direto no checkpointer: 50 mensagens (10 já fora da janela de 40), uma preferência dita de
+// passagem no começo, um "esquece" que não pode ser desfeito, voos, um documento e um monitoramento
+const doContexto = "falso-contexto";
+const naMemoria = (conversa: string) => grafo.getState({ configurable: { thread_id: conversa } });
+const montarConversa = async (conversa: string, pares: number) => {
+	const historia: BaseMessage[] = [];
+	for (let i = 0; i < pares; i++) historia.push(new HumanMessage(i === 0 ? "moro em Recife e prefiro voo direto" : i === 1 ? "esquece que moro em Recife" : `pergunta ${i}`), new AIMessage(`resposta ${i}`));
+	await grafo.updateState({ configurable: { thread_id: conversa } }, { messages: historia, voos: [voo, barata], pesquisadoEm: Date.now(), resumo: "", resumoAte: 0 }, "lembrar");
+};
+await montarConversa(doContexto, 25);
+guardarPreferencia(doContexto, "evita madrugada");
+guardarDossie(doContexto, { passaporte_validade: "2030-01-01" });
+criarMonitoramento({ conversa: doContexto, origens: "GRU", destinos: "LIS", data: "2026-12-12", data_volta: null, adultos: 1, criancas: 0, classe: "economica", preco_alvo: null, menor_preco: null, avisado_preco: null, checado_em: 0 });
+
+// o retrato: uma função só, sem modelo, para o Slack e para o painel
+const retrato = await retratoDaConversa(doContexto);
+assert.deepEqual([retrato.mensagens, retrato.naJanela, retrato.foraDaJanela, retrato.voos, retrato.pedidoPelaMetade], [50, 40, 10, 2, false]);
+assert.deepEqual(retrato.preferencias, ["evita madrugada"]);
+assert.equal(retrato.dossie?.passaporte_validade, "2030-01-01");
+assert.match(retrato.monitoramentos[0], /^#\d+: GRU→LIS em 2026-12-12/);
+const retratoNoSlack = retratoParaSlack(retrato);
+assert.match(retratoNoSlack, /40 na memória de agora e 10 mais antigas/);
+assert.match(retratoNoSlack, /Preferências: evita madrugada/);
+assert.match(retratoNoSlack, /passaporte vale até 2030-01-01/);
+assert.ok(listarConversas().includes(doContexto));
+// os dois botões, e o Excluir pede confirmação no próprio Slack
+const [, botoes] = blocosDoContexto(retratoNoSlack) as any[];
+assert.deepEqual(botoes.elements.map((botao: any) => botao.action_id), ["contexto_compactar", "contexto_excluir"]);
+assert.ok(botoes.elements[1].confirm);
+
+// o canal com uma saída falsa no lugar do Slack, e um grafo falso que só anota o que recebeu
+const ditas: { canal: string; text: string; blocks?: unknown[] }[] = [];
+const saidaFalsa = { dizer: async (canal: string, mensagem: { text: string; blocks?: unknown[] }) => (ditas.push({ canal, ...mensagem }), `m${ditas.length}`), editar: async () => {}, apagar: async () => {} };
+const pedidosAoGrafo: string[] = [];
+const canaisFalsos = criarCanais(saidaFalsa, { responder: async (_canal: string, texto: string) => (pedidosAoGrafo.push(texto), "resposta do grafo") });
+await canaisFalsos.receber(doContexto, "Contexto");
+assert.match(ditas.at(-1)!.text, /O que eu lembro desta conversa/);
+assert.ok(ditas.at(-1)!.blocks);
+await canaisFalsos.receber(doContexto, "quero limpar o contexto da viagem pra Roma");
+await canaisFalsos.vazio(doContexto);
+assert.deepEqual(pedidosAoGrafo, ["quero limpar o contexto da viagem pra Roma"]);
+
+// compactar: o resumo passa pelo resumoLimpo, só "prefere voo direto" fica (o "mora em Recife" a pessoa mandou esquecer),
+// ficam as últimas mensagens e os voos, e o painel avisa
+Object.assign(modelos, { especialista: new ModeloFalso([new AIMessage("A pessoa quer ir de Recife a Lisboa. O voo custava R$ 3000."), pediu("lembrar", { guardar: ["mora em Recife", "prefere voo direto"], trocar: [] })]) });
+await canaisFalsos.receber(doContexto, "compactar contexto");
+await canaisFalsos.vazio(doContexto);
+let guardado = (await naMemoria(doContexto)).values;
+assert.equal(guardado.messages.length, 10);
+assert.equal(guardado.messages[0].getType(), "human");
+assert.equal(guardado.messages.at(-1).text, "resposta 24");
+assert.equal(guardado.voos.length, 2);
+assert.equal(guardado.resumo, "A pessoa quer ir de Recife a Lisboa.");
+assert.equal(guardado.resumoAte, 10);
+assert.deepEqual(listarPreferencias(doContexto).map((preferencia) => preferencia.texto), ["evita madrugada", "prefere voo direto"]);
+assert.match(ditas.at(-1)!.text, /saíram 40 mensagens antigas[\s\S]*ficaram as últimas 10[\s\S]*prefere voo direto/);
+assert.match(avisosDoPainel.filter((aviso) => aviso.conversa === doContexto && aviso.no === "contexto").at(-1)!.detalhe, /^compactou: /);
+// a conversa segue normal depois: o agente de contexto não resume de novo o que o resumo já cobre
+rodada = await rodarComFalsos(doContexto, "oi", [planoFalso(), new AIMessage("Oi!")], []);
+assert.equal(rodada.estado.messages.length, 12);
+// conversa curta: nada a compactar, e nenhum modelo é chamado
+assert.match(await compactar("falso-curta"), /não há o que compactar/);
+
+// o modelo falhou: nada é apagado
+await montarConversa("falso-contexto-falha", 15);
+Object.assign(modelos, { especialista: new ModeloFalso([new Error("a Ollama recusou")]) });
+assert.match(await canaisFalsos.comando("falso-contexto-falha", "compactar"), /^Não consegui compactar a conversa agora, e nada foi apagado/);
+assert.equal((await naMemoria("falso-contexto-falha")).values.messages.length, 30);
+
+// excluir: zera mensagens, resumo e voos; monitoramentos, preferências, documentos e planilhas ficam
+Object.assign(modelos, { especialista: new ModeloFalso([]) });    // não há mensagem com pista nova: não chama modelo
+await canaisFalsos.botao(doContexto, "excluir");
+guardado = (await naMemoria(doContexto)).values;
+assert.deepEqual([guardado.messages?.length ?? 0, guardado.voos?.length ?? 0, guardado.resumo ?? ""], [0, 0, ""]);    // a conversa sumiu inteira
+assert.equal(listarMonitoramentos(doContexto).length, 1);
+assert.deepEqual(listarPreferencias(doContexto).map((preferencia) => preferencia.texto), ["evita madrugada", "prefere voo direto"]);
+assert.equal(lerDossie(doContexto)?.passaporte_validade, "2030-01-01");
+assert.match(ditas.at(-1)!.text, /^Pronto, apaguei esta conversa da minha memória: 12 mensagens/);
+// excluir apaga do arquivo também: nenhum checkpoint antigo guarda a conversa
+const historicoDoExcluido = [];
+for await (const passo of grafo.getStateHistory({ configurable: { thread_id: doContexto } })) historicoDoExcluido.push(passo);
+assert.equal(historicoDoExcluido.length, 0);
+// e a próxima mensagem começa do zero, sem o estado quebrado
+rodada = await rodarComFalsos(doContexto, "oi", [planoFalso(), new AIMessage("Oi!")], []);
+assert.equal(rodada.estado.messages.length, 2);
+
+// o lote confere cada fato contra uma mensagem sozinha: "moro em São Paulo" + "prefiro ir pra Lisboa" não viram "mora em Lisboa",
+// e nada guardado é trocado pelo que a pessoa disse antes ("moro em Recife" é velho; "mora em São Paulo" já está guardado)
+const historiaDoLote = [new HumanMessage("moro em Recife"), new AIMessage("ok"), new HumanMessage("moro em São Paulo"), new AIMessage("ok"), new HumanMessage("prefiro ir pra Lisboa"), new AIMessage("ok")];
+for (let i = 0; i < 10; i++) historiaDoLote.push(new HumanMessage(`pergunta ${i}`), new AIMessage(`resposta ${i}`));
+await grafo.updateState({ configurable: { thread_id: "falso-lote" } }, { messages: historiaDoLote }, "lembrar");
+guardarPreferencia("falso-lote", "mora em São Paulo");
+Object.assign(modelos, { especialista: new ModeloFalso([new AIMessage("A pessoa quer ir a Lisboa."), pediu("lembrar", { guardar: ["mora em Lisboa", "mora em Recife", "prefere ir pra Lisboa"], trocar: ["mora em São Paulo"] })]) });
+await compactar("falso-lote");
+assert.deepEqual(listarPreferencias("falso-lote").map((preferencia) => preferencia.texto), ["mora em São Paulo", "prefere ir pra Lisboa"]);
+
+// pedido parado no meio: compactar recusa (a próxima mensagem retoma ele); excluir apaga e não sobra nada para retomar
+await montarConversa("falso-meio", 15);
+await grafo.updateState({ configurable: { thread_id: "falso-meio" } }, { plano: [] }, "preparar");
+assert.ok((await naMemoria("falso-meio")).next.length > 0);
+assert.match(await compactar("falso-meio"), /^Tem um pedido que parou no meio/);
+// e excluir com o modelo quebrando: apaga mesmo assim, e conta que não guardou preferências novas
+Object.assign(modelos, { especialista: new ModeloFalso([new Error("a Ollama recusou")]) });
+assert.match(await canaisFalsos.comando("falso-meio", "excluir"), /Não consegui guardar preferências novas desta vez/);
+assert.deepEqual((await naMemoria("falso-meio")).next, []);
+assert.equal((await naMemoria("falso-meio")).values.messages?.length ?? 0, 0);
+
+// excluir com pedido rodando: recusado, para o pedido não escrever de volta o que acabou de ser apagado
+const pedidoPreso = Promise.withResolvers<string>();
+const canaisOcupados = criarCanais(saidaFalsa, { responder: () => pedidoPreso.promise });
+await canaisOcupados.receber("falso-ocupado", "voos para Lisboa");
+await canaisOcupados.receber("falso-ocupado", "excluir contexto");
+assert.match(ditas.at(-1)!.text, /^Estou terminando outra coisa nesta conversa/);
+pedidoPreso.resolve("ok");
+await canaisOcupados.vazio("falso-ocupado");
+// compactar com pedido rodando espera ele terminar, e só então mexe na memória
+const outroPreso = Promise.withResolvers<string>();
+const canaisNaEspera = criarCanais(saidaFalsa, { responder: () => outroPreso.promise });
+await canaisNaEspera.receber("falso-na-espera", "voos para Lisboa");
+let compactou = false;
+const compactando = canaisNaEspera.comando("falso-na-espera", "compactar").then((texto) => (compactou = true, texto));
+await new Promise((pronto) => setTimeout(pronto, 50));
+assert.equal(compactou, false);
+outroPreso.resolve("ok");
+assert.match(await compactando, /não há o que compactar/);
+
+// o painel: a lista, o retrato, e o POST só com o Origin do próprio painel
+const painelDoContexto = ligarPainel(0, canaisFalsos.acoesDoPainel)!;
+await new Promise((pronto) => painelDoContexto.once("listening", pronto));
+const portaDoContexto = (painelDoContexto.address() as any).port;
+const enderecoDoContexto = `http://127.0.0.1:${portaDoContexto}`;
+assert.ok((await (await fetch(enderecoDoContexto + "/conversas")).json()).includes(doContexto));
+assert.equal((await (await fetch(`${enderecoDoContexto}/conversas/${doContexto}`)).json()).conversa, doContexto);
+const { request } = await import("node:http");
+const postar = (caminho: string, origem?: string) => new Promise<number>((pronto) => {
+	request({ host: "127.0.0.1", port: portaDoContexto, path: caminho, method: "POST", headers: origem ? { Origin: origem } : {} }, (resposta) => { resposta.resume(); pronto(resposta.statusCode!); }).end();
+});
+await montarConversa("falso-contexto-painel", 25);
+assert.equal(await postar("/conversas/falso-contexto-painel/excluir", "https://site-ruim.example.com"), 403);
+assert.equal(await postar("/conversas/falso-contexto-painel/excluir"), 403);    // sem Origin também não
+assert.equal(await postar(`/conversas/falso-contexto-painel/excluir`, `http://localhost:${portaDoContexto}.site-ruim.example.com`), 403);
+assert.equal((await naMemoria("falso-contexto-painel")).values.messages.length, 50);
+assert.equal(await postar("/conversas/nao%20vale/excluir", enderecoDoContexto), 400);
+assert.equal(await postar("/conversas/falso-contexto-painel/apagar-tudo", enderecoDoContexto), 404);
+assert.equal(await postar("/conversas/falso-contexto-painel/excluir", enderecoDoContexto), 200);
+assert.equal((await naMemoria("falso-contexto-painel")).values.messages?.length ?? 0, 0);
+assert.match(avisosDoPainel.filter((aviso) => aviso.conversa === "falso-contexto-painel" && aviso.no === "contexto").at(-1)!.detalhe, /^excluiu: /);
+painelDoContexto.closeAllConnections();
+painelDoContexto.close();
+
 // ---------- O PAINEL AO VIVO ----------
 // o ouvinte vê cada nó começar e terminar, na ordem em que o grafo roda, e cada chamada de modelo
 rodada = await rodarComFalsos("falso-painel", "voos de GRU para REC em 16/12",
@@ -1696,6 +1856,9 @@ const servida = await (await fetch(endereco)).text();
 assert.match(servida, /data-no="pesquisador"/);
 assert.match(servida, /Agente · glm-5\.3-flash/);
 assert.doesNotMatch(servida, /\{\{/);
+assert.match(servida, /id="contexto"/);    // a seção das conversas e do contexto (F72)
+// sem as ações (a prova liga o painel assim), as rotas das conversas dizem 404 em vez de quebrar
+assert.equal((await fetch(endereco + "/conversas")).status, 404);
 // um site que aponte o domínio dele para 127.0.0.1 (DNS rebinding) leva 403, e não as mensagens do Slack
 const { get } = await import("node:http");
 const deFora = await new Promise<number>((pronto) => get({ host: "127.0.0.1", port: (painel.address() as any).port, path: "/eventos", headers: { Host: "site-ruim.example.com" } }, (resposta) => { resposta.resume(); pronto(resposta.statusCode!); }));

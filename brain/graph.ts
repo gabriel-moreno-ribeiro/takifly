@@ -763,6 +763,12 @@ const memoria = SqliteSaver.fromConnString(process.env.MEMORIA ?? import.meta.di
 // as conversas que têm memória, da que mexeu por último à mais antiga, para o painel. Lê a tabela do SqliteSaver
 // direto: o list() dele abriria cada checkpoint guardado. O id do checkpoint cresce com o tempo (uuid6).
 // shortcut: depende do nome da tabela do @langchain/langgraph-checkpoint-sqlite 1.1; se ele mudar, a lista sai vazia (o teste avisa)
+// o excluir do contexto (brain/context.ts) apaga a conversa inteira do arquivo, com todos os checkpoints antigos:
+// um checkpoint novo e vazio deixaria a conversa toda no disco, lida pelo getStateHistory
+export async function apagarConversa(conversa: string) {
+	await memoria.deleteThread(conversa);
+}
+
 export function listarConversas(): string[] {
 	try {
 		const linhas = (memoria as any).db.prepare("SELECT thread_id, MAX(checkpoint_id) AS ultimo FROM checkpoints WHERE checkpoint_ns = '' GROUP BY thread_id ORDER BY ultimo DESC").all();

@@ -151,6 +151,21 @@ Já guardado: ${guardadas.length > 0 ? guardadas.join("; ") : "nada"}. Não repi
 Na dúvida, devolva as duas listas vazias.`;
 }
 
+// ---------- O JUIZ DAS MENSAGENS SEGUIDAS ----------
+// chegou uma mensagem enquanto um pedido do mesmo canal ainda roda: o modelo barato decide o que fazer com ela
+// (brain/channel.ts). Não fala com a pessoa: o motivo vai só para o painel e para o Langfuse.
+export const DECISOES_DO_JUIZ = ["refazer", "fila", "ignorar_espera"] as const;
+export const Decisao = z.object({
+	decisao: z.enum(DECISOES_DO_JUIZ).describe("refazer, fila ou ignorar_espera"),
+	motivo: z.string().describe("o porquê, em poucas palavras"),
+});
+
+export const INSTRUCOES_DO_JUIZ = `O Takifly, um bot de passagens aéreas, ainda trabalha num pedido quando chega outra mensagem da mesma pessoa. Decida o que fazer com ela:
+refazer: a mensagem muda ou completa o pedido em andamento (outra data, outro destino, mais pessoas, outra classe, "na verdade...", "e pra 2 pessoas").
+fila: a mensagem é outro assunto ou outro pedido, que pode esperar o atual terminar.
+ignorar_espera: a mensagem não pede nada ("ok", "valeu", "obrigado", "tá bom").
+Na dúvida entre refazer e fila, escolha fila. Escreva o motivo em poucas palavras.`;
+
 // o orquestrador é um modelo, então o código confere o plano: tira nomes inventados e repetidos e põe na ordem certa
 export function planoValido(agentes: string[]) {
 	return ORDEM.filter((nome) => agentes.includes(nome));
