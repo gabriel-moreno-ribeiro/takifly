@@ -68,6 +68,11 @@ Regra que não pode quebrar: **o modelo não responde isso de memória.** Númer
 **3.4 Juntar `pesquisarVarios` e `maisBaratoDoTrecho`** (`brain/tools.ts`)
 - São dois loops parecidos sobre origem × destino. Juntar custa um parâmetro a mais. Só vale a pena quando um dos dois precisar mudar.
 
+**3.5 Terminar a auditoria das regras do redator** (`brain/agents.ts`)
+- O quê: um comentário acima de `instrucoesDoRedator`, uma linha por regra, dizendo se ela é fato conferido por código, segurança, produto ou estilo. Regra que o código já garante só sai do prompt com a nota da prova antes e depois.
+- Por quê: regra a cada erro incha o prompt. Em 08/11 o custo-benefício e o ano passaram para o verificador; a parte da classe ficou de fora, porque recusaria perguntas e avisos de falha que não citam a classe.
+- Onde: `brain/agents.ts` e `brain/checker.ts`. Medir com a prova gasta crédito.
+
 ---
 
 ## 4. Recursos do LangGraph que ainda não usamos
@@ -95,6 +100,11 @@ Regra que não pode quebrar: **o modelo não responde isso de memória.** Númer
 **5.3 O vigia avisar também por e-mail**
 - `sources/email.ts` já existe, e o vigia já aceita uma lista de canais. Falta passar a função na lista do `watcher.ts`.
 
+**5.4 Prazo e retentativas: nenhum pedido preso por minutos**
+- O quê: `maxRetries: 2` no `criarModelo` (`brain/graph.ts`), `AbortSignal.timeout(180_000)` no `grafo.stream` do `rodar()` e `AbortSignal.timeout(30_000)` no fetch da planilha (`sources/spreadsheet.ts`), como o de `sources/flights.ts`.
+- Por quê: hoje o LangChain repete até 6 vezes, com 120 s cada, e um pedido pode ficar minutos sem resposta. O passo 1, a retomada que quebra não prender o canal, foi feito em 08/11.
+- Antes: medir no Langfuse a duração dos pedidos e das chamadas mais longas, para o prazo não cortar um pedido que hoje termina.
+
 ---
 
 ## 6. Segurança e dados (as outras ideias da Uber)
@@ -121,16 +131,34 @@ Regra que não pode quebrar: **o modelo não responde isso de memória.** Númer
 - As famílias com escrita pior são as de várias cidades ou vários dias numa resposta só: `varios-destinos` (3,25), `limite`, `intervalo` e `hotel` (3,50). Resposta grande é onde o redator se perde.
 
 **7.4 Decidir se o limite de 7 dias é do pedido ou da chamada**
-- Para "qual o dia mais barato entre 8 e 22 de julho", o modelo divide em duas chamadas de 7 dias e faz 12 buscas, que é o limite do pedido. Se 7 dias é um limite de produto, ele precisa ser contado por pedido. Se não é, a description do `buscar_voos` pode dizer que dá para dividir.
+- Para "qual o dia mais barato entre 8 e 22 de julho", o modelo divide em duas chamadas de 7 dias. Desde 08/11 não há limite de buscas por pedido (só 12 chamadas da ferramenta), então as duas saem, mais devagar. Se 7 dias é um limite de produto, ele precisa ser contado por pedido. Se não é, a description do `buscar_voos` pode dizer que dá para dividir.
 
 **7.5 Ajustar os `maxPorPedido` do registro**
 - Os números de hoje são escolha nossa. A prova mostra se algum aperta.
+
+**7.6 Os tokens de cada pedido na prova**
+- O quê: cada linha da prova grava os tokens de entrada e de saída de cada mensagem, somados por um `handleLLMEnd`.
+- Por quê: a linha já diz de que commit veio e por onde passou, mas o custo de cada pedido só aparece no Langfuse, que gasta cota.
+- Onde: só `quality/exam.ts`, porque o `brain/tracing.ts` roda no bot e no vigia. Antes, conferir se a Ollama Cloud devolve o `usage`.
 
 ---
 
 ## 8. Arrumação pendente
 
-- **Commit.** Nada foi commitado depois de `ecda5f3`: o rename para inglês, o registro, o vigia separado. Tudo está só no disco.
 - **Renomear a pasta** `passagens.ts/` para `flight-bot/`, com as duas sessões e os dois processos fechados (eles seguram os `.sqlite`).
 - **`docs/manual/`**: as notas e o `build.py` ainda usam os caminhos antigos (`harness/…`, `teste.ts`, `voos.ts`), e o `index.html` gerado ainda cita `buscar_varios_dias`.
 - **Atalhos conhecidos**: `grep -rn 'shortcut:' --include='*.ts' .` lista todos, com o limite e quando melhorar. Os que viraram trabalho têm id no `feature_list.json`.
+
+---
+
+## 9. O harness do agente de código
+
+**9.1 Um hook Stop que roda os testes** (`.claude/hooks/pronto.ts`)
+- O quê: quando há `.ts` ou `.json` mudado, o hook roda `node quality/tests.ts` e não deixa o Claude parar sem `Tudo certo!`.
+- Por quê: "nada está pronto sem `npm test`" ainda é regra escrita. Ficou para depois porque o `verify-feature.ts` já roda os testes antes de promover.
+- Cuidados: timeout explícito, sair com 0 quando vier `stop_hook_active`, guardar o resultado pelo hash do `git diff`. Risco: outra sessão editando a pasta faz o hook bloquear por um erro que não é desta.
+
+**9.2 Verificações que não provam o comportamento** (`feature_list.json`)
+- O quê: as `verification` de H07, F25 e H14 passam com um `grep -q` só, a de F51 só conta cenários e a de F61 confere um `git status` vazio, que foi um fato de 05/11. H14 ganha um bloco no `quality/tests.ts` com `ModeloFalso` e `SEM_VERIFICADOR=1`; H07, F51 e F61 viram `manual:`; F25 ganha `node --check bot.ts` ou vira `manual:`. Um bloco VERIFICAÇÃO NÃO É SÓ GREP recusa item que não está passing com uma verificação que é só `grep -q`.
+- Por quê: o `verify-feature.ts` promove o que a verificação disser, e um comentário com a palavra procurada já bastaria para o item virar passing. Até hoje nenhum item passou assim.
+- Onde: `feature_list.json` e `quality/tests.ts`. Grátis.

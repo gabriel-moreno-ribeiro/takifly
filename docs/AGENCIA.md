@@ -168,15 +168,28 @@ que agora roda o grafo inteiro com modelos falsos (`ModeloFalso` em `quality/tes
 | H16 | Todo especialista volta ao orquestrador. Quem terminou (ou teve a ferramenta recusando) só libera o próximo, sem chamada de modelo; quem voltou dizendo que faltou algo faz o orquestrador refazer o plano, até 2 vezes por pedido. Ninguém trabalha uma terceira vez, e quem já resolveu não é chamado de novo | `noOrquestrador`, campos `feitos` e `replanos` |
 | H17 | Agente de contexto: assim que uma mensagem sai da janela de 40 sem estar no resumo, o modelo barato resume as que saíram e as 20 seguintes (nada fica no buraco), e o código tira do resumo valor, horário, duração, link e documento | `noContexto`, `resumoLimpo` |
 | H18 | Agente de memória, no fim do pedido: com pista em primeira pessoa ("moro", "prefiro", "sempre viajo") e sem o especialista `memoria` no pedido (senão ficariam duas cópias), o modelo barato propõe fatos. O código só guarda o que começa com a forma da pista ("mora" só com "moro"), usa só palavras da pessoa, não tem número, valor nem assunto sensível, e não repete. Documento continua só com o especialista `memoria` | `noLembrar`, `fatosParaGuardar` |
-| H19 | Painel ao vivo: com o bot ligado, http://localhost:4500 acende cada nó do grafo na hora em que roda, com o que decidiu, quanto levou e quantas chamadas de cada modelo o pedido fez. Só escuta no próprio Mac, recusa outro `Host` (DNS rebinding) e nunca derruba o bot | `brain/live.ts`, `brain/live.html` |
+| H31 | Painel ao vivo: com o bot ligado, http://localhost:4500 acende cada nó do grafo na hora em que roda, com o que decidiu, quanto levou e quantas chamadas de cada modelo o pedido fez. Só escuta no próprio Mac, recusa outro `Host` (DNS rebinding) e nunca derruba o bot | `brain/live.ts`, `brain/live.html` |
 | F28 | Agente `guia`, o quinto especialista: clima de verdade (`ver_clima`, Open-Meteo, grátis só para uso não comercial; cidade em inglês, ganha a maior), visto e vacina pela tabela do bot (`regras_de_entrada`, a mesma do nó `conferir`) e o resto pela internet (`buscar_na_web`, a busca da Ollama com a mesma chave). Texto de página chega sem tags e sem links, pelo `textoDeFora`, marcado como dado; o verificador não aceita página como prova de preço em R$ e passou a conferir temperatura. O redator cita o site. Agente novo inteiro: as ferramentas já entram ligadas, e o PR só vai para a `main` depois que os 14 cenários `guia-` passam, dois deles com páginas que tentam mandar no bot | `sources/web.ts`, `sources/weather.ts`, `regrasDeEntrada` em `rules/rules.ts`, `guia` em `brain/agents.ts` |
 
 Revisão independente em 08/11 (um agente que não sabia das minhas conclusões) achou 10 problemas nesta primeira
 versão; os 10 foram consertados, cada um com o seu teste. O mais grave: as preferências entravam na mesma lista
 que a trava da data inventada lê, e "mora em Natal" soltava qualquer data. Agora elas valem só para o lugar.
 
-O que ainda não foi medido: a prova (`quality/exam.ts`) com um modelo barato de verdade nos especialistas.
-Gasta crédito, então é a pessoa que decide quando rodar.
+Medido em 08/11: a prova (`quality/exam.ts`) com o glm-5.3 no forte e o glm-5.3-flash nos especialistas deu
+278/284. As causas das falhas estão em `docs/progress.md`.
+
+Auditoria do harness, também em 08/11: mudanças no bot, cada uma com teste e sem crédito. O efeito nas respostas
+reais só a prova mede (o próximo passo em `docs/progress.md`).
+
+| Item | O que mudou | Onde |
+|---|---|---|
+| F64 | O verificador recusa preço dado à companhia errada: numa linha com uma companhia só e um valor só, o par preço e companhia tem de estar nos fatos. Linha com total, soma, média, diferença, ida e volta ou por pessoa fica de fora | `verificarResposta` em `brain/checker.ts` |
+| F65 | O custo-benefício e os números sem R$ dos fatos, como o ano, não viram preço aceito; a linha que diz que o número é o custo-benefício pode citá-lo | `verificarResposta` em `brain/checker.ts` |
+| F66 | O `calcular` recusa multiplicar um preço (100 ou mais) pelo número de passageiros de uma busca do mesmo pedido (busca de 2 adultos, × 2), porque o preço do voo já é o total deles; busca de 1 adulto × 4 continua valendo | `calcular` em `brain/tools.ts` |
+| F67 | Passar do limite de 12 buscas vira "não pesquisei ...: passou do limite", e não "A BUSCA FALHOU", para a resposta não pedir para tentar de novo | `pesquisarVarios` em `brain/tools.ts` |
+| — | 08/11: o limite de 12 buscas por pedido saiu, a pedido da pessoa. Depois de 12 buscas o bot espera 3 s entre uma e outra; no "erro 429" do Google espera 30 s e tenta uma vez mais. A partir de 6 buscas numa chamada, o aviso no Slack vira uma barra ("▓▓▓░░░░░░░ 9 de 21 · falta uns 2 min"). A trava contra loop do modelo continua: 12 chamadas de `buscar_voos` | `pesquisar`, `pesquisarVarios` e `barraDaBusca` em `brain/tools.ts` |
+| F68 | "São José" sozinho pergunta qual é (SJK, SJP, SJC ou SJO); "São José dos Campos" continua indo direto | `PERGUNTAR` em `rules/airports.ts` |
+| F69 | Se a retomada de um pedido que caiu quebra de novo, o bot avisa a pessoa, anota `retomada_falhou` no Langfuse e segue com a mensagem nova, em vez de prender o canal | `responder` em `brain/graph.ts` |
 
 ### Workflow ou agente: o que é o quê neste bot (decidido em 08/11)
 

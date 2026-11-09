@@ -11,21 +11,25 @@
 //   PARTE=2/8 node quality/exam.ts                        só a 2ª de 8 partes (para rodar vários ao mesmo tempo)
 //   CENARIOS=10k AMOSTRA=48 node quality/exam.ts          48 dos 10 mil cenários gerados, espalhados por todas as famílias
 //   CENARIOS=10k PARTE=3/8 node quality/exam.ts           a 3ª de 8 partes dos 10 mil (os 10 mil inteiros levam dias)
+//   REFAZER=falhas node quality/exam.ts                   roda de novo só os que reprovaram, no mesmo arquivo
+//   REJULGAR=1 node quality/exam.ts                       julga de novo as respostas guardadas, sem chamar o modelo (as de outro dia mantêm o veredito)
 //
-// Cada resultado é salvo em results/<modelo>.jsonl assim que sai. Rodar de novo pula o que já terminou.
+// Cada resultado é salvo em results/<modelo>.jsonl assim que sai, com o commit e o caminho de cada mensagem. Rodar de novo pula o que já terminou.
 // Para ver a comparação entre os modelos:   node quality/scoreboard.ts
 
+import { execFileSync } from "node:child_process";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 
 import { conferirPedido } from "../sources/flights.ts";
-import { BASE, catalogo, type Cenario, cenarios, hoteisFalsos, proximoDia } from "./scenarios.ts";
+import { catalogo, type Cenario, cenarios, emOrdem, hoteisFalsos, proxima, proximoDia } from "./scenarios.ts";
+import { casosTerminados, companhias, desistiu, fatosErrados, gravadaEmOutroDia, temValor } from "./judges.ts";
 import { semAcento } from "../rules/airports.ts";
 
 // ---------- MEMÓRIA SEPARADA ----------
 // precisa vir antes de carregar o agente: a prova nunca pode mexer na sua conversa do Slack
 process.env.MEMORIA = ":memory:";
 process.env.DADOS = ":memory:";
-const { responder } = await import("../brain/graph.ts");
+const { grafo, responder } = await import("../brain/graph.ts");
 const { rotuloDosModelos } = await import("../brain/models.ts");
 const { servicos } = await import("../brain/tools.ts");
 const { lerDossie, listarMonitoramentos, listarPreferencias } = await import("../storage/database.ts");
@@ -55,8 +59,8 @@ const { lerClima } = await import("../sources/weather.ts");
 servicos.verClima = async (cidade: string) => {
 	climas.push(cidade);
 	return lerClima({ name: cidade, country: "Planeta Teste" }, {
-		timezone: "UTC", current: { time: "2026-12-01T15:00", temperature_2m: 21.3, apparent_temperature: 22.1, weather_code: 2 },
-		daily: { time: ["2026-12-01", "2026-12-02"], temperature_2m_max: [24.4, 23], temperature_2m_min: [15.2, 16], precipitation_probability_max: [10, 60], weather_code: [2, 61] },
+		timezone: "UTC", current: { time: `${proxima(12, 1)}T15:00`, temperature_2m: 21.3, apparent_temperature: 22.1, weather_code: 2 },
+		daily: { time: [proxima(12, 1), proxima(12, 2)], temperature_2m_max: [24.4, 23], temperature_2m_min: [15.2, 16], precipitation_probability_max: [10, 60], weather_code: [2, 61] },
 	});
 };
 const PAGINAS: [RegExp, string, string, string][] = [
@@ -79,52 +83,8 @@ servicos.criarPlanilha = async (_titulo, voos) => {
 };
 
 // ---------- OS JUÍZES ----------
-const ida = catalogo("GRU", "LIS", "2026-12-12");
-const companhias = BASE.map((voo) => voo.companhia);
-
-function numeroEmReais(texto: string) {
-	return Number(texto.replace(/[.\s]/g, "").replace(",", "."));
-}
-
-function horasEmMinutos(horas: string, minutos?: string) {
-	return Number(horas) * 60 + Number(minutos ?? 0);
-}
-
-// confere a resposta sem usar nada do bot: um preço ou uma duração ao lado de uma companhia
-// tem de ser daquela companhia. Foi assim que nasceu o erro "Air Europa, 10h de viagem".
-function fatosErrados(resposta: string) {
-	const problemas: string[] = [];
-	const precosDasBuscas = buscas.flatMap((busca) => catalogo(busca.origem, busca.destino, busca.data, busca.adultos, busca.criancas, busca.classe));
-	for (const linha of resposta.split("\n")) {
-		const nomes = companhias.filter((nome) => linha.includes(nome));
-		if (nomes.length !== 1) continue;
-		const nome = nomes[0];
-		const doVoo = precosDasBuscas.filter((voo) => voo.companhia === nome);
-
-		const precos = [...linha.matchAll(/R\$\s*(\d{1,3}(?:[. \u00A0\u202F]\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/g)].map((achado) => numeroEmReais(achado[1]));
-		// fora dessa faixa é uma soma ou uma diferença de preços, e não o preço de um voo
-		const faixa = doVoo.map((voo) => voo.preco);
-		const pareceOPreco = faixa.length === 0 || (precos[0] >= Math.min(...faixa) * 0.5 && precos[0] <= Math.max(...faixa) * 1.5);
-		// "coût-bénéfice" e "preço médio" não são o preço do voo: nos 10 mil, 4 respostas certas caíram aqui
-		if (precos.length === 1 && pareceOPreco && !doVoo.some((voo) => voo.preco === precos[0]) && !/custo|b[eé]n[eé]f|equivalente|total|soma|a mais|diferen|ida e volta|m[eé]di[ao]|moyen|average|promedio|cupom|desconto|parcela|por pessoa|cada um/i.test(linha)) problemas.push(`preço errado para ${nome}: ${linha}`);
-
-		const duracoes = [...linha.matchAll(/(\d{1,2})\s*h(?:oras?)?(?:\s*e)?\s*(\d{2})?(?:\s*min(?:utos)?)?\s*(?:de\s+)?(?:viagem|voo|dura)/gi)];
-		for (const achado of duracoes) {
-			const minutos = horasEmMinutos(achado[1], achado[2]);
-			// a linha pode comparar com outro voo ("em vez de 24h35"), então vale qualquer duração que exista
-			// "economiza 14h15 de viagem" é uma diferença, e não a duração de um voo
-			if (/economiz|a mais|a menos|diferen|saves?\b|less|more/i.test(linha)) continue;
-			if (!precosDasBuscas.some((voo) => voo.duracao_min === minutos)) problemas.push(`duração errada para ${nome}: ${linha}`);
-		}
-	}
-	return problemas;
-}
-
-// "R$ 3.147,50" e "3 147.50" contam como 3147.5
-function temValor(resposta: string, valor: number) {
-	const semPontos = resposta.replace(/(\d),(\d{3})(?!\d)/g, "$1$2").replace(/(\d)[.\s](\d{3})/g, "$1$2").replace(/(\d),(\d)/g, "$1.$2");
-	return semPontos.includes(String(valor));
-}
+// o fatosErrados e o temValor moram no judges.ts, que o tests.ts testa sem rodar a prova
+const ida = catalogo("GRU", "LIS", proxima(12, 12));
 
 function semReais(resposta: string) {
 	return /R\$\s*\d/.test(resposta) ? ["citou preço sem ter voo: " + resposta.slice(0, 120)] : [];
@@ -158,7 +118,7 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 		nome: "direto",
 		mensagens: ["voos de GRU para LIS em 12/12"],
 		juiz: (r) => [
-			...(buscas.some((b) => b.origem === "GRU" && b.destino === "LIS" && b.data === "2026-12-12") ? [] : ["não pesquisou GRU→LIS 2026-12-12: " + JSON.stringify(buscas)]),
+			...(buscas.some((b) => b.origem === "GRU" && b.destino === "LIS" && b.data === proxima(12, 12)) ? [] : [`não pesquisou GRU→LIS ${proxima(12, 12)}: ` + JSON.stringify(buscas)]),
 			...(temValor(r.ultima, ida[0].preco) ? [] : [`não citou o mais barato (${ida[0].preco})`]),
 			...(r.ultima.includes("https://planilha.falsa/") ? [] : ["não mandou o link da planilha"]),
 		],
@@ -184,10 +144,12 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 		nome: "ida-e-volta",
 		mensagens: ["GRU para Lisboa dia 12/12 com volta dia 20/12, qual o total mais barato?"],
 		juiz: (r) => {
-			const volta = catalogo("LIS", "GRU", "2026-12-20");
+			// hoje entre 13/12 e 20/12, a volta cai antes da ida: só o básico, como nos cenários
+			if (!emOrdem(proxima(12, 12), proxima(12, 20))) return [];
+			const volta = catalogo("LIS", "GRU", proxima(12, 20));
 			const total = ida[0].preco + volta[0].preco;
 			return [
-				...(buscas.some((b) => b.origem === "LIS" && b.data === "2026-12-20") ? [] : ["não pesquisou a volta"]),
+				...(buscas.some((b) => b.origem === "LIS" && b.data === proxima(12, 20)) ? [] : ["não pesquisou a volta"]),
 				...(temValor(r.ultima, total) ? [] : [`total errado: esperava ${total}: ${r.ultima.slice(0, 200)}`]),
 			];
 		},
@@ -231,10 +193,11 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 	{
 		nome: "dias-flexiveis",
 		mensagens: ["qual o dia mais barato para ir de GRU para LIS entre 10/12 e 14/12?"],
-		juiz: (r) => [
+		// hoje entre 11/12 e 14/12, o intervalo atravessa hoje: só o básico
+		juiz: (r) => !emOrdem(proxima(12, 10), proxima(12, 14)) ? [] : [
 			...(buscas.length >= 5 ? [] : [`pesquisou só ${buscas.length} dias`]),
 			...(/\b14\b/.test(r.ultima) ? [] : ["não apontou o dia 14: " + r.ultima.slice(0, 200)]),
-			...(temValor(r.ultima, catalogo("GRU", "LIS", "2026-12-14")[0].preco) ? [] : ["não citou o preço do dia 14"]),
+			...(temValor(r.ultima, catalogo("GRU", "LIS", proxima(12, 14))[0].preco) ? [] : ["não citou o preço do dia 14"]),
 		],
 	},
 	{
@@ -242,7 +205,7 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 		mensagens: ["voos de GRU para LIS em 12/12 para 2 adultos e 1 criança em executiva"],
 		juiz: (r) => [
 			...(buscas.some((b) => b.adultos === 2 && b.criancas === 1 && b.classe === "executiva") ? [] : ["passageiros ou classe errados: " + JSON.stringify(buscas[0])]),
-			...(temValor(r.ultima, catalogo("GRU", "LIS", "2026-12-12", 2, 1, "executiva")[0].preco) ? [] : ["não citou o preço total certo"]),
+			...(temValor(r.ultima, catalogo("GRU", "LIS", proxima(12, 12), 2, 1, "executiva")[0].preco) ? [] : ["não citou o preço total certo"]),
 		],
 	},
 	{
@@ -284,7 +247,9 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 		nome: "dificil-volta-antes-da-ida",
 		mensagens: ["ida GRU para LIS em 20/12 e volta em 10/12, qual o total?"],
 		juiz: (r) => {
-			const total = catalogo("GRU", "LIS", "2026-12-20")[0].preco + catalogo("LIS", "GRU", "2026-12-10")[0].preco;
+			// hoje entre 11/12 e 20/12, o 10/12 já é do ano que vem e a volta deixa de ser antes da ida
+			if (!emOrdem(proxima(12, 10), proxima(12, 20))) return [];
+			const total = catalogo("GRU", "LIS", proxima(12, 20))[0].preco + catalogo("LIS", "GRU", proxima(12, 10))[0].preco;
 			return [...exigir(!temValor(r.ultima, total), "somou uma volta anterior à ida"), ...exigir(/antes|anterior|\?/.test(r.ultima), "não avisou do problema nas datas")];
 		},
 	},
@@ -301,7 +266,7 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 	{
 		nome: "dificil-dois-destinos",
 		mensagens: ["de GRU em 12/12: é mais barato ir para Lisboa ou para Madri?"],
-		juiz: (r) => [...citou(r.ultima, catalogo("GRU", "MAD", "2026-12-12")[0].preco), ...exigir(/madri|madrid|MAD/i.test(r.ultima), "não apontou Madri")],
+		juiz: (r) => [...citou(r.ultima, catalogo("GRU", "MAD", proxima(12, 12))[0].preco), ...exigir(/madri|madrid|MAD/i.test(r.ultima), "não apontou Madri")],
 	},
 	{
 		nome: "dificil-fim-de-semana",
@@ -343,17 +308,17 @@ const casos: { nome: string; mensagens: string[]; juiz: (r: Resultado) => string
 	{
 		nome: "dificil-mudou-a-data",
 		mensagens: [PEDIDO, "na verdade é dia 13, pesquisa de novo"],
-		juiz: (r) => [...exigir(buscas.some((b) => b.data === "2026-12-13"), "não pesquisou o dia 13"), ...citou(r.ultima, catalogo("GRU", "LIS", "2026-12-13")[0].preco)],
+		juiz: (r) => [...exigir(buscas.some((b) => b.data === proxima(12, 13)), "não pesquisou o dia 13"), ...citou(r.ultima, catalogo("GRU", "LIS", proxima(12, 13))[0].preco)],
 	},
 	{
 		nome: "dificil-mudou-passageiros",
 		mensagens: [PEDIDO, "e se formos em 2 adultos?"],
-		juiz: (r) => [...exigir(buscas.some((b) => b.adultos === 2), "não pesquisou para 2 adultos"), ...citou(r.ultima, catalogo("GRU", "LIS", "2026-12-12", 2)[0].preco)],
+		juiz: (r) => [...exigir(buscas.some((b) => b.adultos === 2), "não pesquisou para 2 adultos"), ...citou(r.ultima, catalogo("GRU", "LIS", proxima(12, 12), 2)[0].preco)],
 	},
 	{
 		nome: "dificil-tres-mensagens",
 		mensagens: [PEDIDO, "e de GRU para MAD no mesmo dia?", "qual dos dois destinos sai mais barato?"],
-		juiz: (r) => [...citou(r.ultima, catalogo("GRU", "MAD", "2026-12-12")[0].preco), ...exigir(/madri|madrid|MAD/i.test(r.ultima), "não apontou Madri")],
+		juiz: (r) => [...citou(r.ultima, catalogo("GRU", "MAD", proxima(12, 12))[0].preco), ...exigir(/madri|madrid|MAD/i.test(r.ultima), "não apontou Madri")],
 	},
 
 	// quando algo dá errado ou alguém empurra o bot para errar
@@ -460,10 +425,13 @@ const PASTA = process.env.RESULTADOS ?? import.meta.dirname + "/../results";
 const ARQUIVO = `${PASTA}/${MODELO.replaceAll(":", "-")}${DEZ_MIL ? "-10k" : ""}.jsonl`;
 const TEMPO_MAXIMO = 8 * 60 * 1000;
 await mkdir(PASTA, { recursive: true });
+// cada linha diz de que código veio: "-sujo" quando havia mudança sem commit
+const git = (...args: string[]) => execFileSync("git", args, { cwd: import.meta.dirname, encoding: "utf8" }).trim();
+const COMMIT = git("rev-parse", "--short", "HEAD") + (git("status", "--short") ? "-sujo" : "");
 
-// o que já terminou não roda de novo. Um cenário que parou por erro de rede ou de crédito roda sim, porque não diz nada sobre o modelo.
+// o que já terminou não roda de novo (as regras estão no casosTerminados). Com REFAZER=falhas, os reprovados rodam de novo no mesmo arquivo
 const linhas = (await readFile(ARQUIVO, "utf8").catch(() => "")).split("\n").filter(Boolean).map((linha) => JSON.parse(linha));
-const terminados = new Set(linhas.filter((linha) => !linha.erro).map((linha) => linha.caso));
+const terminados = casosTerminados(linhas, process.env.REFAZER);
 
 // AMOSTRA=48: um de cada família por rodada, até completar. É sempre a mesma amostra, então dá para continuar depois.
 function amostra<T extends { nome: string }>(lista: T[], quantos: number) {
@@ -486,6 +454,12 @@ function normalizar(texto: string) {
 	return texto.normalize("NFKC").replaceAll("Ibéria", "Iberia");
 }
 
+// a rodada e o REJULGAR julgam por aqui: todas as respostas passam pelos fatos e pela desistência
+function julgar(caso: { juiz: (r: Resultado) => string[] }, respostas: string[], conversa?: string) {
+	const todas = respostas.join("\n");
+	return [...caso.juiz({ respostas, ultima: respostas.at(-1)!, conversa }), ...fatosErrados(todas, buscas), ...desistiu(todas)];
+}
+
 // ---------- JULGAR DE NOVO ----------
 // quando um juiz muda, as respostas guardadas são julgadas outra vez, sem gastar crédito.   REJULGAR=1 node quality/exam.ts
 if (process.env.REJULGAR) {
@@ -494,13 +468,21 @@ if (process.env.REJULGAR) {
 		if (!caso || linha.erro) return linha;
 		buscas = linha.buscas;
 		hoteis = linha.hoteis ?? [];
+		// as linhas antigas guardaram só a última resposta
+		const respostas = (linha.respostas ?? [linha.resposta]).map(normalizar);
 		climas = linha.climas ?? [];
 		perguntasNaWeb = linha.web ?? [];
-		const ultima = normalizar(linha.resposta);
 		const deDados = (linha.problemas ?? []).filter((problema: string) => problema.startsWith("[dados]"));
-		const problemas = [...caso.juiz({ respostas: [ultima], ultima }), ...fatosErrados(ultima), ...deDados];
+		const problemas = [...julgar(caso, respostas), ...deDados];
+		// o juiz de hoje pode esperar outra data que o do dia da gravação: virar o veredito seria julgar errado, e só a prova paga desfaria
+		if ((problemas.length === 0) !== linha.passou && gravadaEmOutroDia(linha.conversa ?? "")) {
+			console.log(`MANTIDO ${linha.caso}: gravado em outro dia, e as datas sem ano mudam com o dia. Para julgar com o juiz novo, rode o caso de novo (gasta crédito): ${problemas.join(" | ")}`);
+			return linha;
+		}
 		return { ...linha, passou: problemas.length === 0, problemas };
 	});
+	// antes de sobrescrever, mostra o que o juiz novo mudou
+	for (const [indice, nova] of novas.entries()) if (nova.passou !== linhas[indice].passou) console.log(`${nova.passou ? "AGORA PASSA" : "AGORA FALHA"} ${nova.caso}: ${nova.problemas.join(" | ")}`);
 	await writeFile(ARQUIVO, novas.map((linha) => JSON.stringify(linha)).join("\n") + "\n");
 	console.log(`${MODELO}: ${novas.filter((linha) => linha.passou).length} de ${novas.length}`);
 	process.exit(0);
@@ -515,20 +497,25 @@ for (const caso of selecionados) {
 	const inicio = Date.now();
 	const conversa = `prova ${MODELO} ${caso.nome} ${inicio}`;
 	let problemas: string[];
-	let ultima = "";
+	let respostas: string[] = [];
 	let erro = "";
+	// por onde cada mensagem passou. O estado zera a cada pedido (noPreparar), então é lido depois de cada uma
+	const caminho: { feitos: string[]; replanos: number; tentativas: number }[] = [];
 	try {
 		// os juízes de monitoramento olham o banco de dados, que é o mesmo durante a prova inteira: cada conversa só vê os seus
 		const conversar = async () => {
 			const respostas: string[] = [];
-			for (const mensagem of caso.mensagens) respostas.push(normalizar(await responder(conversa, mensagem)));
+			for (const mensagem of caso.mensagens) {
+				respostas.push(normalizar(await responder(conversa, mensagem)));
+				const { feitos, replanos, tentativas } = (await grafo.getState({ configurable: { thread_id: conversa } })).values;
+				caminho.push({ feitos, replanos, tentativas });
+			}
 			return respostas;
 		};
 		// shortcut: um cenário que estoura o tempo continua rodando por trás e pode somar buscas ao próximo; é raro, e esse próximo só teria a nota errada.
 		const limite = new Promise<never>((_, rejeitar) => setTimeout(() => rejeitar(new Error("passou de 8 minutos")), TEMPO_MAXIMO).unref());
-		const respostas = await Promise.race([conversar(), limite]);
-		ultima = respostas.at(-1)!;
-		problemas = [...caso.juiz({ respostas, ultima, conversa }), ...fatosErrados(respostas.join("\n"))];
+		respostas = await Promise.race([conversar(), limite]);
+		problemas = julgar(caso, respostas, conversa);
 	} catch (falha: any) {
 		erro = falha.message;
 		problemas = ["o bot quebrou: " + erro];
@@ -539,7 +526,7 @@ for (const caso of selecionados) {
 	console.log(`${passou ? "PASSOU" : "FALHOU"} ${caso.nome} (${segundos}s)`);
 	for (const problema of problemas) console.log("   - " + problema);
 
-	await appendFile(ARQUIVO, JSON.stringify({ modelo: MODELO, caso: caso.nome, passou, erro, problemas, mensagens: caso.mensagens, resposta: ultima, buscas, hoteis, climas, web: perguntasNaWeb, segundos, conversa }) + "\n");
+	await appendFile(ARQUIVO, JSON.stringify({ modelo: MODELO, commit: COMMIT, caso: caso.nome, passou, erro, problemas, mensagens: caso.mensagens, respostas, resposta: respostas.at(-1) ?? "", buscas, hoteis, climas, web: perguntasNaWeb, caminho, segundos, conversa }) + "\n");
 	// a nota aparece na sessão do Langfuse: dá para filtrar só o que falhou
 	anotar(conversa, "passou", passou, problemas.join(" | "));
 }

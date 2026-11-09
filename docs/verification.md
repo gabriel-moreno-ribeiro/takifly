@@ -18,18 +18,19 @@ Rodam nesta ordem. Uma camada falhando para tudo: não se passa para a próxima.
 | 2. Prova | `node quality/exam.ts <família ou cenário>` | crédito da Ollama, ~40 s por cenário | mudou prompt, ferramenta, agente ou grafo (`brain/`, `quality/scenarios.ts`) |
 | 3. Produção | `node takifly.ts restart`, depois `node takifly.ts status` e `tail -n 5 logs/bot.log` com "Takifly ligado no Slack", e uma mensagem real no Slack | mexe nos serviços em uso | só quando a pessoa pedir |
 
-A prova pula o que já está em `results/<modelo>.jsonl`. Para rodar de novo num código novo, use uma pasta vazia: `RESULTADOS=results/<nome-novo> node quality/exam.ts <família>`. O `verify-feature.ts` já faz isso sozinho.
+A prova pula o que já está em `results/<modelo>.jsonl`. Para rodar de novo num código novo, use uma pasta vazia: `RESULTADOS=results/<nome-novo> node quality/exam.ts <família>`. O `verify-feature.ts` já faz isso sozinho. Para repetir só os reprovados no mesmo arquivo, use `REFAZER=falhas` (gasta crédito como a prova).
 
 # Pronto
 
 - Pronto é a verificação do item rodando agora e passando, não o código escrito.
-- Só `node quality/verify-feature.ts <id>` muda um item para `passing`: ele roda a `verification`, e só com saída 0 grava a evidência (data, commit, última linha da saída). Nunca escreva `passing` à mão.
+- Só `node quality/verify-feature.ts <id>` muda um item para `passing`: ele roda `npm test` e a `verification` (os testes vão antes quando ela mesma não roda `node quality/tests.ts`, `npm test` nem `bash init.sh`), e só com saída 0 grava a evidência (data, commit, arquivos sem commit e a última linha com `Tudo certo!` ou `N de M`). Nunca escreva `passing` à mão.
+- Item com a prova na `verification` gasta crédito: o `verify-feature.ts` recusa sem `CREDITO=1`. Com o ok da pessoa, rode a prova uma vez só, por `CREDITO=1 node quality/verify-feature.ts <id>`, e não antes na camada 2.
 - Verificação nova só vale depois de você vê-la falhar uma vez, com o item ainda por fazer.
 - Item com `verification` começando por `manual:` é conferido pela pessoa, que registra a evidência.
 
 # Juízes
 
-`quality/tests.ts`, `quality/scenarios.ts`, `quality/scenarios-10k.ts`, `brain/checker.ts` e as `REGRAS` de `quality/style-judge.ts` medem o bot. Não afrouxe nenhum deles para algo passar. Se um juiz estiver errado, prove com um caso novo em `quality/tests.ts` ou com `REJULGAR=1 node quality/exam.ts` (rejulga as respostas guardadas sem gastar crédito) e mostre à pessoa antes de mudar.
+`quality/tests.ts`, `quality/scenarios.ts`, `quality/scenarios-10k.ts`, `quality/judges.ts`, os juízes de `quality/exam.ts`, `brain/checker.ts` e as `REGRAS` de `quality/style-judge.ts` medem o bot. Não afrouxe nenhum deles para algo passar. Se um juiz estiver errado, prove com um caso novo em `quality/tests.ts` ou com `REJULGAR=1 node quality/exam.ts` (rejulga as respostas guardadas sem gastar crédito; só as gravadas hoje mudam de veredito, e as de outro dia aparecem como MANTIDO) e mostre à pessoa antes de mudar.
 
 # Métricas
 

@@ -12,10 +12,18 @@ echo "==> Node $(node --version)"
 
 npm install --no-fund --no-audit --loglevel=error
 
+FALTA=""
 for CHAVE in SLACK_BOT_TOKEN SLACK_APP_TOKEN OLLAMA_API_KEY; do
-	grep -q "^$CHAVE=" .env 2>/dev/null || { echo "Falta $CHAVE no .env (docs/conventions.md lista as chaves)."; exit 1; }
+	grep -q "^$CHAVE=" .env 2>/dev/null && continue
+	# worktree do Orca não tem .env: os testes rodam sem ele, e bot e vigia só ligam da pasta principal
+	[ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ] || { echo "Falta $CHAVE no .env (docs/conventions.md lista as chaves)."; exit 1; }
+	FALTA="$FALTA $CHAVE"
 done
-echo "==> .env com as chaves obrigatórias"
+if [ -n "$FALTA" ]; then
+	echo "==> Worktree sem$FALTA no .env: os testes rodam, mas bot e vigia não ligam desta pasta (ligue da pasta principal)"
+else
+	echo "==> .env com as chaves obrigatórias"
+fi
 
 echo "==> npm test"
 node quality/tests.ts

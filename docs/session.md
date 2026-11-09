@@ -23,7 +23,7 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-11-04T20:47:43Z }
 
 # Fim
 
-1. Verificação do item, do jeito de `docs/verification.md`. Passou: `node quality/verify-feature.ts <id>`.
+1. Verificação do item, do jeito de `docs/verification.md`. Mudou `brain/` ou `quality/`: chame o subagente `revisor` (`.claude/agents/revisor.md`) antes do verify-feature e conserte o que ele achar. Passou: `node quality/verify-feature.ts <id>`.
 2. `docs/progress.md` atualizado: estado verificado, item ativo, próximo passo, uma linha no topo de Sessões.
 3. Item feito sai do `docs/FUTURE.md` e entra no `docs/AGENCIA.md`, no mesmo commit.
 4. Commit quando a pessoa pedir, um por assunto, com o porquê no corpo. `git status --short` vazio, ou o que sobrou explicado em `docs/progress.md`.

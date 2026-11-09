@@ -10,18 +10,31 @@ stale_after: 2026-11-11T00:00:00Z
 
 # Estado verificado
 
-- Main em `2175ee2` (merge do PR #2, harness dos agentes). A pasta principal está na main.
+- Main em `6928ba1` (merge do PR #3, interface no Slack). A pasta principal está na main.
+- A auditoria do harness de 08/11 está na branch `gabriel-moreno-ribeiro/harness-curso-v2` (worktree do Orca, criada da main `6928ba1`), toda sem commit: `git status --short` lista os arquivos.
 - O WhatsApp sem commit da pasta principal foi guardado, sem mudanças, na branch local `whatsapp-em-andamento` (`2d38c63`). Para retomar: `git switch whatsapp-em-andamento` na pasta principal.
-- `npm test`: Tudo certo! em 2026-11-08 na worktree, sem `.env` (agora ele é opcional para os testes), com o grafo inteiro rodando em modelos falsos.
-- Serviços: `com.takifly.bot` e `com.takifly.watcher` reiniciados em 08/11 às 15h com a main `2175ee2` (glm-5.3 + glm-5.3-flash); log com "Takifly ligado no Slack". Falta uma mensagem real no Slack.
+- `npm test`: Tudo certo! em 2026-11-08 na branch da auditoria, sem `.env`, com o grafo inteiro rodando em modelos falsos.
+- Serviços: `node takifly.ts status` mostra `bot.ts` e `watcher.ts` rodando, ligados em 08/11 às 16h26 da pasta principal, logo depois do merge `6928ba1`. A branch da auditoria não está no ar. Falta uma mensagem real no Slack.
 
 # Item ativo
 
-Nenhum. H15, F26, H16, H17, H18 e H08 passaram pelo `verify-feature.ts` em 08/11 (camada 1, sem crédito). H08 está só no disco, sem commit.
+Nenhum. A auditoria do harness de 08/11 promoveu pelo `verify-feature.ts` (camada 1, sem crédito) H03, H09, H19 a H27 e F64 a F69. Ficaram `not_started`: H12 (o CI só vale depois de rodar verde no GitHub), H28, H29, H30 e F70.
 
-A pessoa escolheu os modelos em 08/11: glm-5.3 no forte, glm-5.3-flash no barato (`brain/models.ts`). A prova ainda não mediu essa dupla.
+A pessoa escolheu os modelos em 08/11: glm-5.3 no forte, glm-5.3-flash no barato (`brain/models.ts`). A prova mediu essa dupla em 08/11: 278/284.
 
-Próximo passo: investigar as 2 falhas da prova de 08/11 (`seguimento-mais-rapido`, `lugar-sao-jose`), ambas do modelo forte.
+As 2 falhas que sobraram da prova de 08/11, com a causa achada na auditoria:
+- `lugar-sao-jose`: defeito do código, não do modelo. A tabela do mundo levava "sao jose" direto para SJC (San Jose, nos EUA), sem perguntar; a busca foi GRU→SJC e a trava avisou do visto americano (`results/glm-5.3+glm-5.3-flash.jsonl`). Conserto: F68.
+- `seguimento-mais-rapido`: a resposta deixou confuso de qual companhia era cada preço, e o juiz leu um preço como da Azul. O verificador conferia cada valor sozinho, e não o par companhia e preço, então deixou passar; o mesmo erro reprovou o `fala-enrolada` na primeira rodada ("Air Europa por R$ 3250", que é preço da Azul). Conserto: F64. A frase exata não ficou em `results/`: a rodada repetida está no scratchpad de outra sessão.
+
+Próximo passo, da pessoa (gasta crédito da Ollama e cota do Langfuse): rodar a prova só dos 7 cenários que as mudanças do bot tocam, para medir o efeito antes do commit. São `fala-enrolada` e `seguimento-mais-rapido` (F64), `conta-hora-por-reais` (F65), `rota-ida-e-volta-executiva` e `conta-quatro-pessoas` (F66), `rota-flexivel-acima-do-limite` (F67) e `lugar-sao-jose` (F68). A worktree não tem `.env`, então o comando lê o da pasta principal sem copiá-lo, e grava numa pasta nova de `results/` para não pular os casos que já rodaram. No terminal, dentro de `/Users/ithaca3_/orca/workspaces/passagens.ts/cuskeel`:
+
+```
+for c in fala-enrolada seguimento-mais-rapido rota-ida-e-volta-executiva conta-quatro-pessoas conta-hora-por-reais rota-flexivel-acima-do-limite lugar-sao-jose; do RESULTADOS=results/auditoria-08-11 node --env-file="/Users/ithaca3_/VS Code/Gabriel <> Ithaca W1/passagens.ts/.env" quality/exam.ts "$c"; done
+```
+
+Cada cenário mostra PASSOU ou FALHOU e "Nota de glm-5.3+glm-5.3-flash: 1 de 1" (uns 30 s cada). A guarda do Claude pede o ok antes, porque o comando roda a prova e usa o `.env`.
+
+Depois, quando a pessoa pedir: commit na branch, PR, merge na main, `git pull` na pasta principal e `node takifly.ts restart` (as mudanças do bot só valem no Slack depois disso). O push roda o CI pela primeira vez: verde no GitHub, `node quality/verify-feature.ts H12`.
 
 Depois: `F13`, o bot só pesquisar com origem, destino e data de cada trecho (custa crédito: 7 cenários da prova).
 
@@ -32,17 +45,19 @@ Depois: `F13`, o bot só pesquisar com origem, destino e data de cada trecho (cu
 | 2026-11-08 | guia, antes do merge | glm-5.3 + glm-5.3-flash | 14 `guia-` + 40 sorteados | 14/14 e 39/40 | | o único que falhou, `sem-data`, pediu o que faltava com "me diz:" sem "?", e o juiz não reconhece; já falhava em 30/10. Juiz a rever com a pessoa |
 | 2026-11-08 | 63a4965 | glm-5.3 + glm-5.3-flash | 284 | 278/284; com o conserto 6048585 os 6 que falharam rodaram de novo e 4 passaram (~280/284) | | seguimento-mais-rapido (preço atribuído à Azul), lugar-sao-jose (não perguntou qual São José). Antes 282/284 com o grafo antigo. 26 s por caso, contra 37 s |
 | 2026-11-03 | sem commit | glm-5.3 | 10 mil gerados | 9767/10000 | 4,26/5 | saudacao 203/250, hotel 390/450, classe 369/400 |
-| 2026-10-30 | f52b5ee | glm-5.3, gemma4:31b, gpt-oss:20b, nemotron-3-nano:30b | 284 | ver `node quality/scoreboard.ts` (hoje quebra, item H09) | | |
+| 2026-10-30 | f52b5ee | glm-5.3, gemma4:31b, gpt-oss:20b, nemotron-3-nano:30b | 284 | ver `node quality/scoreboard.ts` (na pasta principal, que tem os resultados) | | |
 
 # Sessões
 
 ## 2026-11-08
 
+- Conferência final, depois dos agentes: a trava do `calcular` (F66) recusava qualquer preço × 2 a 9 e quebraria o `conta-quatro-pessoas` (busca de 1 adulto, pergunta para 4); agora recusa só o número de passageiros da própria busca. A guarda pedia o ok para `grep data` e commit com a palavra "data" (o dia da viagem); agora `data` e `logs` sem barra só contam em `rm`, `cp`, `ls`, `cat` e parecidos. Com o verificador final, as respostas aprovadas guardadas da prova (278 + 282) não têm nenhuma recusa nova, e os 10 mil têm 1 em 9767.
+- Auditoria do harness, a pedido da pessoa (branch `gabriel-moreno-ribeiro/harness-curso-v2`, sem commit): guarda do Claude (H19), trava de crédito e evidência melhor no `verify-feature.ts` (H20), `init.sh` em worktree sem `.env` (H21), revisor como subagente (H22), CI escrito (H12, falta rodar), laço do verificador testado de graça (H23), datas da prova andando com hoje (H24), juízes testáveis (H25), commit e caminho em cada linha da prova (H26), `REFAZER=falhas` (H27), placar (H09) e id citado nas notes conferido (H03); no bot, F64 a F69. Tudo com teste e sem crédito. Uma revisão independente achou 14 problemas: 11 consertados com teste; ficaram 3 de gravidade baixa (a guarda pergunta à toa em algumas leituras e o comentário dela ainda diz que `bash -c` passa; a regra do F64 recusaria uma comparação como "o mais barato é R$ 2850, se não fizer questão da TAP"; o commit gravado pela prova sai `-sujo` na pasta principal por causa de um PDF solto). Para depois: F70, H13, H28, H29 e H30 (`docs/FUTURE.md`).
 - Agente guia com internet e clima (F28), a pedido da pessoa: `ver_clima` (Open-Meteo) e `buscar_na_web` (busca da Ollama, mesma chave). Testes sem crédito passam; uma revisão independente reprovou a primeira versão (página com "R$ 89" e link de golpe passavam no verificador) e os 10 problemas foram consertados com teste. Prova autorizada pela pessoa: 14/14 nos `guia-` (duas vezes, a segunda pelo `verify-feature.ts`) e 39/40 em 40 antigos sorteados.
-- Painel ao vivo (H19), a pedido da pessoa: http://localhost:4500 com o bot ligado. Callback do LangChain em `rodar()` + SSE, sem dependência nova (os prontos do GitHub são de Python). Revisão independente achou 10 problemas (o pior: DNS rebinding lia as mensagens), todos consertados com teste. Entra no ar com merge e restart.
+- Painel ao vivo (H31), a pedido da pessoa: http://localhost:4500 com o bot ligado. Callback do LangChain em `rodar()` + SSE, sem dependência nova (os prontos do GitHub são de Python). Revisão independente achou 10 problemas (o pior: DNS rebinding lia as mensagens), todos consertados com teste. Entra no ar com merge e restart.
 - Painel mais vivo, a pedido da pessoa: só as setas do caminho percorrido acendem, a seta do passo de agora corre em laranja com uma bolinha, e o aviso novo pisca na lista. `npm test` confere que cada seta liga nós que existem.
-- Interface no Slack, a pedido da pessoa (branch `gabriel-moreno-ribeiro/interface-slack`, sem commit): progresso passo a passo (F21 passou), links com nome e sem prévia, milhar com ponto, "Peguei" na fila, resposta para foto e áudio, erro sem jargão, emergência e aviso de preço para gente. Só código, sem prompt: não gasta crédito. Detalhes em `docs/AGENCIA.md`, "A interface no Slack". Mascote: `assets/taki-icone.png` e `assets/taki-emoji.png` gerados da foto da pessoa; o código usa `:taki:`. Antes do restart, a pessoa precisa subir o emoji no Slack. Quando a branch `whatsapp-em-andamento` voltar, o mapa `EMOJIS` de `sources/whatsapp.ts` precisa de `taki: "🐶"`. Falta: botões e boas-vindas (precisam de config no Slack).
-- Prova da dupla glm-5.3 + glm-5.3-flash: 278/284. Achou um defeito do grafo novo (replano sem plano derrubava o pedido), consertado em `6048585` com teste. Sobraram 2 falhas do modelo forte, a investigar. A pessoa escolheu pôr no ar mesmo com Fatos ~2 abaixo; PR #2 com merge.
+- Interface no Slack, a pedido da pessoa (commit `b4ba9b3`, na main pelo PR #3, `6928ba1`): progresso passo a passo (F21 passou), links com nome e sem prévia, milhar com ponto, "Peguei" na fila, resposta para foto e áudio, erro sem jargão, emergência e aviso de preço para gente. Só código, sem prompt: não gasta crédito. Detalhes em `docs/AGENCIA.md`, "A interface no Slack". Mascote: `assets/taki-icone.png` e `assets/taki-emoji.png` gerados da foto da pessoa; o código usa `:taki:`. Antes do restart, a pessoa precisa subir o emoji no Slack. Quando a branch `whatsapp-em-andamento` voltar, o mapa `EMOJIS` de `sources/whatsapp.ts` precisa de `taki: "🐶"`. Falta: botões e boas-vindas (precisam de config no Slack).
+- Prova da dupla glm-5.3 + glm-5.3-flash: 278/284. Achou um defeito do grafo novo (replano sem plano derrubava o pedido), consertado em `6048585` com teste. Sobraram 2 falhas, que a auditoria do mesmo dia pôs no código (`lugar-sao-jose`) e numa folga do verificador (`seguimento-mais-rapido`); causas em "Item ativo". A pessoa escolheu pôr no ar mesmo com Fatos ~2 abaixo; PR #2 com merge.
 - A pedido da pessoa: WhatsApp guardado na branch `whatsapp-em-andamento`, main nova na pasta principal, `npm test` Tudo certo! lá e restart.
 - H08: `hojeEmSaoPaulo` e `somarDias` foram para `rules/dates.ts`; `rules/` e `sources/` não importam mais `brain/`, e o bloco FRONTEIRAS do `quality/tests.ts` confere. `brain/tools.ts` reexporta as duas, então nenhum outro arquivo mudou.
 - Harness dos agentes, a pedido da pessoa: modelo forte e barato por papel (H15), "pronto" conferido por código (F26), especialistas voltando ao orquestrador (H16), agente de contexto (H17) e agente de memória (H18). Detalhes em `docs/AGENCIA.md`, seção "O harness dos agentes".

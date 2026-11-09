@@ -1,4 +1,4 @@
-// scoreboard.ts - lê results/*.jsonl e mostra a nota de cada modelo, por grupo e por cenário
+// scoreboard.ts - lê results/*.jsonl e mostra a nota de cada arquivo (um modelo, ou os 10 mil dele com -10k), por grupo e por cenário
 //
 // Como rodar (dentro da pasta passagens.ts/, a de cima):
 //   node quality/scoreboard.ts                              a rodada atual
@@ -11,11 +11,14 @@ const PASTA = process.argv[2] ?? import.meta.dirname + "/../results";
 // se um cenário rodou mais de uma vez, vale a última
 const notas = new Map<string, Map<string, any>>();
 for (const arquivo of await readdir(PASTA)) {
-	if (!arquivo.endsWith(".jsonl")) continue;
+	// o .estilo.jsonl é do juiz de escrita e não tem nota de Fatos
+	if (!arquivo.endsWith(".jsonl") || arquivo.endsWith(".estilo.jsonl")) continue;
+	// o rótulo é o arquivo, e não linha.modelo: senão os 10 mil somavam com a prova de 284 do mesmo modelo
+	const rotulo = arquivo.replace(/\.jsonl$/, "");
 	const texto = await readFile(`${PASTA}/${arquivo}`, "utf8");
 	for (const linha of texto.split("\n").filter(Boolean).map((l) => JSON.parse(l))) {
-		if (!notas.has(linha.modelo)) notas.set(linha.modelo, new Map());
-		notas.get(linha.modelo)!.set(linha.caso, linha);
+		if (!notas.has(rotulo)) notas.set(rotulo, new Map());
+		notas.get(rotulo)!.set(linha.caso, linha);
 	}
 }
 

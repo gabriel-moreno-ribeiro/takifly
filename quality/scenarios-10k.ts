@@ -18,7 +18,7 @@
 
 import assert from "node:assert/strict";
 
-import { barato, BASE, catalogo, type Cenario, proximoDia } from "./scenarios.ts";
+import { barato, BASE, catalogo, type Cenario, proxima, proximoDia } from "./scenarios.ts";
 import { paisDoAeroporto, resolverAeroportos, semAcento } from "../rules/airports.ts";
 import { conferirViagem } from "../rules/rules.ts";
 
@@ -58,11 +58,6 @@ function somarDias(data: string, dias: number) {
 const doisDigitos = (numero: number) => String(numero).padStart(2, "0");
 function iso(ano: number, mes: number, dia: number) {
 	return `${ano}-${doisDigitos(mes)}-${doisDigitos(dia)}`;
-}
-// sem ano: a próxima vez que o dia acontece, contando hoje
-function proxima(mes: number, dia: number) {
-	const ano = Number(hoje().slice(0, 4));
-	return iso(ano, mes, dia) >= hoje() ? iso(ano, mes, dia) : iso(ano + 1, mes, dia);
 }
 
 // texto: "12/12" ou "Natal". quando: o mesmo já com a preposição certa, "em 12/12" ou "no Natal"

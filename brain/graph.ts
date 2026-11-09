@@ -22,8 +22,9 @@
 //
 // Usam IA: orquestrador e redator (modelo forte); especialistas, lembrar e contexto (modelo barato). O resto é código.
 //
-// Para perguntar pelo terminal:   node brain/graph.ts "voos de GRU para LIS em 12/12"
-// Para gerar o desenho:           node brain/graph.ts       (depois: open brain/graph.html)
+// Para perguntar pelo terminal:   DADOS=:memory: MEMORIA=:memory: node brain/graph.ts "voos de GRU para LIS em 12/12"
+// Para gerar o desenho:           DADOS=:memory: MEMORIA=:memory: node brain/graph.ts       (depois: open brain/graph.html)
+// (sem DADOS e MEMORIA, ele abre os bancos do bot em uso, em data/)
 // Para ver ao vivo:               com o bot ligado, http://localhost:4500 (brain/live.ts; o desenho de lá é brain/live.html)
 
 import { randomUUID } from "node:crypto";
@@ -38,13 +39,13 @@ import { ChatOpenAI } from "@langchain/openai";
 
 import { AGENTES, INSTRUCOES_DO_RESUMO, instrucoesDaMemoria, instrucoesDoOrquestrador, instrucoesDoRedator, Lembrete, type NomeDoAgente, Plano, planoValido } from "./agents.ts";
 import { apagarPreferencia, type Dossie, guardarPreferencia, lerDossie, listarMonitoramentos, listarPreferencias } from "../storage/database.ts";
-import { type Caderno, conferirNoRegistro, descreverMonitoramento, descreverVoo, LIMITE_DE_PREFERENCIAS, limparArgumentos, servicos } from "./tools.ts";
+import { type Caderno, conferirNoRegistro, descreverMonitoramento, descreverVoo, LIMITE_DE_PREFERENCIAS, limparArgumentos, avisosDaBusca, servicos } from "./tools.ts";
 import { semAcento } from "../rules/airports.ts";
 import { conferirViagem, paisDoAeroporto, type Trecho, type Viagem } from "../rules/rules.ts";
 import { anotar, rastrear } from "./tracing.ts";
 import { ouvinteAoVivo } from "./live.ts";
 import { nomesDosModelos, rotuloDosModelos } from "./models.ts";
-import { arrumarParaSlack, escreveuChamada, prometeuSemFazer, verificarResposta } from "./checker.ts";
+import { arrumarParaSlack, escreveuChamada, prometeuSemFazer, RESPOSTA_QUE_NAO_SAIU, verificarResposta } from "./checker.ts";
 import { REGRA_DO_CUSTO_BENEFICIO, type Voo } from "../sources/flights.ts";
 import { horas } from "../sources/spreadsheet.ts";
 
@@ -648,8 +649,6 @@ function noEmergencia(estado: typeof Estado.State, config: LangGraphRunnableConf
 	return { messages: [new AIMessage(texto)], correcao: "" };
 }
 
-const RESPOSTA_QUE_NAO_SAIU = "Me enrolei e não consegui montar a resposta. Pode repetir com outras palavras?";
-
 // a lista da emergência é para gente: o resumirVoos é para o modelo e traz custo-benefício (parece preço e não é)
 // e nome de ferramenta. Tudo aqui sai de estado.voos, que só tem o que as ferramentas devolveram
 export function listarVoosParaPessoa(voos: Voo[]) {
@@ -800,12 +799,22 @@ async function rodar(entrada: { messages: BaseMessage[] } | null, config: { conf
 // conversa: o identificador da conversa (no Slack, o canal). Cada um tem a sua pasta separada no arquivo.
 export async function responder(conversa: string, texto: string, avisar: Avisar = () => {}): Promise<string> {
 	const config = { configurable: { thread_id: conversa } };
+	// a busca grande desenha a barra de progresso por aqui. O próximo pedido da conversa troca pela função nova
+	avisosDaBusca.set(conversa, avisar);
 
 	// se o bot caiu no meio de um pedido, primeiro terminamos esse pedido de onde ele parou,
 	// e a resposta dele vai junto (ela pode trazer o link de uma planilha)
 	let respostaAtrasada = "";
 	const anterior = await grafo.getState(config);
-	if (anterior.next.length > 0) respostaAtrasada = (await rodar(null, config, avisar)) + "\n\n";
+	try {
+		if (anterior.next.length > 0) respostaAtrasada = (await rodar(null, config, avisar)) + "\n\n";
+	} catch (erro: any) {
+		// uma retomada que quebra sempre prenderia o canal: a mensagem nova começa do zero e descarta o pedido antigo
+		console.log(`[responder] não retomei o pedido anterior: ${erro.message}`);
+		anotar(conversa, "retomada_falhou", false, erro.message);
+		// o explicarErro prometeu "continuo de onde parei": sem este aviso, o pedido antigo sumia em silêncio
+		respostaAtrasada = "Não consegui terminar o pedido anterior; se ainda precisar dele, mande de novo.\n\n";
+	}
 
 	const resposta = await rodar({ messages: [new HumanMessage(texto)] }, config, avisar);
 	return respostaAtrasada + (resposta || RESPOSTA_QUE_NAO_SAIU);

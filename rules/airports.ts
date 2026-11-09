@@ -38,6 +38,9 @@ const AJUSTES: Record<string, string[]> = {
 	"lisbon": ["LIS"], "lisbonne": ["LIS"], "lisbona": ["LIS"], "lissabon": ["LIS"], "london": ["LHR", "LGW"], "rome": ["FCO"], "new york": ["JFK", "EWR"], "tokyo": ["HND", "NRT"],
 };
 
+// nome de várias cidades que o dado cru resolve para uma só: "sao jose" ia direto para San Jose (EUA), sem perguntar
+const PERGUNTAR: Record<string, string[]> = { "sao jose": ["SJK", "SJP", "SJC", "SJO"] };
+
 // a mesma limpeza que o tools.ts usa nas datas: "São Paulo" e " sao paulo " viram a mesma chave
 export function semAcento(texto: string) {
 	return texto.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
@@ -122,9 +125,10 @@ function codigosDoNome(nome: string) {
 	return AJUSTES[nome] ?? CODIGOS_DA_CIDADE[nome] ?? [];
 }
 
-// quanto erro de digitação eu perdoo: em palavra curta, 1 letra trocada já muda a cidade ("lima"/"lema")
-function limiteDeErro(palavra: string) {
-	return palavra.length <= 5 ? 1 : palavra.length <= 10 ? 2 : 3;
+// quanto erro de digitação eu perdoo: 1 letra a cada 4, arredondando para o mais perto. Até 3 letras, nenhum
+// ("rio"/"rir" são outra coisa); 4 e 5 letras, 1 erro; 6 a 9, 2; 10 a 13, 3. Em palavra curta, 1 letra trocada já muda a cidade
+export function limiteDeErro(palavra: string) {
+	return palavra.length <= 3 ? 0 : Math.round(palavra.length / 4);
 }
 
 // nome parecido NUNCA vira busca: volta como candidato para o modelo confirmar com a pessoa.
@@ -160,6 +164,7 @@ export function resolverAeroportos(texto: string) {
 
 	// 2. nome exato, em qualquer um dos seis idiomas (a tabela à mão vem primeiro: é curadoria).
 	// Object.hasOwn e não só a chave: o texto vem do modelo, e "constructor" existe em qualquer objeto.
+	if (Object.hasOwn(PERGUNTAR, limpo)) pedirConfirmacao(texto, PERGUNTAR[limpo]);
 	if (Object.hasOwn(AJUSTES, limpo)) return AJUSTES[limpo];
 	if (Object.hasOwn(CODIGOS_DA_CIDADE, limpo)) return desempatar(texto, CODIGOS_DA_CIDADE[limpo]);
 
