@@ -162,3 +162,22 @@ Regra que não pode quebrar: **o modelo não responde isso de memória.** Númer
 - O quê: as `verification` de H07, F25 e H14 passam com um `grep -q` só, a de F51 só conta cenários e a de F61 confere um `git status` vazio, que foi um fato de 05/11. H14 ganha um bloco no `quality/tests.ts` com `ModeloFalso` e `SEM_VERIFICADOR=1`; H07, F51 e F61 viram `manual:`; F25 ganha `node --check bot.ts` ou vira `manual:`. Um bloco VERIFICAÇÃO NÃO É SÓ GREP recusa item que não está passing com uma verificação que é só `grep -q`.
 - Por quê: o `verify-feature.ts` promove o que a verificação disser, e um comentário com a palavra procurada já bastaria para o item virar passing. Até hoje nenhum item passou assim.
 - Onde: `feature_list.json` e `quality/tests.ts`. Grátis.
+
+---
+
+## 10. Memória, planilha e mensagens seguidas (madrugada de 08→09/11)
+
+**10.1 Uma planilha por par de cidades, com no máximo 100 voos** (F71)
+- O quê: a mesma viagem entre duas cidades (GRU→GIG, CGH→SDU e VCP→GIG são todos São Paulo–Rio, ida e volta juntas, por conversa) fica numa planilha só. O link de cada (conversa, par) fica no `dados.sqlite`, e a segunda pesquisa reescreve a mesma planilha. Nunca passa de 100 voos: ficam o mais barato, o mais rápido e o de melhor custo-benefício de cada trecho, depois os diretos, depois o resto por custo-benefício. A planilha diz quantos ficaram de fora, e o painel mostra o link, se ela é nova ou reaproveitada e quantos foram cortados.
+- Por quê: hoje cada pesquisa cria uma planilha nova com todos os voos; a pasta do Drive enche e uma busca grande vira uma planilha que ninguém lê.
+- Onde: `noPlanilha` em `brain/graph.ts`, `montarAbas` e um corte novo em `sources/spreadsheet.ts`, a tabela `planilhas` em `storage/database.ts`, a cidade de cada aeroporto em `rules/airports.ts`, o painel (`brain/live.ts`, `brain/live.html`). Sem mudar o `sources/spreadsheet.gs`.
+
+**10.2 Ver o contexto, compactar e excluir** (F72)
+- O quê: `contexto` no Slack (e a lista de conversas no painel) mostra o retrato de uma conversa: mensagens na janela e fora dela, resumo, preferências, dossiê e monitoramentos. `compactar contexto` resume a conversa toda com o modelo barato, guarda nas preferências o que dura e apaga as mensagens antigas. `excluir contexto` guarda o que dura e zera a conversa, mantendo monitoramentos, preferências e dossiê. Botões em Block Kit no Slack e no painel.
+- Por quê: a pessoa não vê o que o bot lembra, nem consegue começar do zero sem perder o que ensinou.
+- Onde: `brain/context.ts` (novo), `brain/channel.ts` (novo), `bot.ts` (`app.action`), `brain/live.ts` e `brain/live.html` (rotas novas, POST com `Origin` conferido).
+
+**10.3 Várias mensagens seguidas: espera, juiz e cancelar** (F73)
+- O quê: as mensagens de um canal esperam 5 s de silêncio e viram um pedido só. Mensagem que chega com um pedido rodando passa por um juiz (modelo barato): `refazer` cancela o pedido e começa de novo com tudo junto, `fila` espera o atual terminar, `ignorar_espera` não faz nada. Juiz que falha ou demora vale `fila`. O cancelamento é de verdade (`AbortSignal` até o `grafo.stream`): a resposta velha não sai, o aviso de progresso some e o pedido não é retomado.
+- Por quê: quem manda "voos para Lisboa" e logo "dia 15" hoje ganha duas pesquisas, e a primeira com a data errada.
+- Onde: `brain/channel.ts` (novo, sem `.env`, para o teste importar), `rodar()` e `responder()` em `brain/graph.ts`, `bot.ts`, `brain/tracing.ts` (a decisão vai como nota), o painel.

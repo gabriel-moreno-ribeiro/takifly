@@ -754,6 +754,33 @@
 			"state": "not_started",
 			"evidence": "",
 			"notes": "auditoria do harness em 2026-11-08 (B6, passo 2); medir os tempos reais antes (a duração dos pedidos e das chamadas mais longas, no Langfuse), para o prazo não cortar um pedido que hoje termina. O fetch do Node já desiste sozinho em 300 s (headersTimeout e bodyTimeout); FUTURE 5.4"
+		},
+		{
+			"id": "F71",
+			"area": "brain",
+			"behavior": "A mesma viagem entre duas cidades, em qualquer aeroporto e nos dois sentidos, fica numa planilha só por conversa: a segunda pesquisa do par reescreve a planilha guardada no dados.sqlite em vez de criar outra. A planilha nunca passa de 100 voos (o mais barato, o mais rápido e o de melhor custo-benefício de cada trecho ficam sempre) e diz quantos ficaram de fora; o painel mostra o link, se é nova ou reaproveitada e quantos foram cortados.",
+			"verification": "grep -q 'A PLANILHA POR PAR DE CIDADES' quality/tests.ts && node quality/tests.ts",
+			"state": "active",
+			"evidence": "",
+			"notes": "madrugada de 08→09/11; FUTURE 10.1. Sem mudar o sources/spreadsheet.gs"
+		},
+		{
+			"id": "F72",
+			"area": "brain",
+			"behavior": "A pessoa vê o que o bot lembra da conversa (contexto no Slack, lista de conversas no painel) e pode compactar (resumo pelo modelo barato, fatos que duram nas preferências, só as últimas mensagens ficam) ou excluir (zera mensagens, resumo e voos; monitoramentos, preferências e dossiê ficam), pelos textos exatos, pelos botões do Slack ou pelo painel, com o Origin conferido nas rotas POST.",
+			"verification": "grep -q 'VER, COMPACTAR E EXCLUIR O CONTEXTO' quality/tests.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "madrugada de 08→09/11; FUTURE 10.2. Os botões do Slack só funcionam com Interactivity ligada no app. O excluir com pedido rodando usa o cancelamento do F73"
+		},
+		{
+			"id": "F73",
+			"area": "brain",
+			"behavior": "Mensagens seguidas no mesmo canal esperam 5 s de silêncio e viram um pedido só. Mensagem nova com pedido rodando passa por um juiz (modelo barato, prazo curto): refazer cancela de verdade e junta as mensagens, fila espera o atual, ignorar_espera não faz nada; juiz que falha vale fila. O pedido cancelado não responde, não é retomado e o aviso de progresso dele some. O painel mostra a espera, a decisão do juiz e o cancelamento.",
+			"verification": "grep -q 'VÁRIAS MENSAGENS SEGUIDAS' quality/tests.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "madrugada de 08→09/11; FUTURE 10.3. A decisão do juiz vai ao Langfuse como nota (brain/tracing.ts)"
 		}
 	]
 }

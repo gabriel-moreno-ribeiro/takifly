@@ -8,6 +8,26 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-11-04T20:47:43Z }
 stale_after: 2026-11-11T00:00:00Z
 ---
 
+# Madrugada 08→09/11
+
+Trabalho sozinho, a pedido da pessoa, na branch `gabriel-moreno-ribeiro/madrugada-memoria-planilha` (worktree do Orca, sem `.env`). Três itens, nesta ordem: F71 (planilha por par de cidades), F72 (ver, compactar e excluir o contexto), F73 (várias mensagens seguidas). O porquê de cada um está no `docs/FUTURE.md`, seção 10.
+
+## Próximo passo
+
+F71 ativo: começar por `cidadeDoAeroporto` em `rules/airports.ts`, o corte de 100 voos em `sources/spreadsheet.ts`, a tabela `planilhas` em `storage/database.ts` e o `noPlanilha` em `brain/graph.ts`. Teste: bloco "A PLANILHA POR PAR DE CIDADES" em `quality/tests.ts`.
+
+## O que ficou pronto
+
+(ainda nada)
+
+## O que travou
+
+(nada até agora)
+
+## Decisões que tomei
+
+(a preencher)
+
 # Estado verificado
 
 - Main em `6928ba1` (merge do PR #3, interface no Slack). A pasta principal está na main.
