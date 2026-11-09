@@ -46,9 +46,7 @@ Regra que não pode quebrar: **o modelo não responde isso de memória.** Númer
 - `read_travel_guide(city, topic)`, com `topic` numa lista fechada: `airport_to_city`, `get_around`, `see`, `do`, `eat`, `safety`.
 - Seis ferramentas que diferem por uma palavra é onde o modelo fraco mais troca uma pela outra.
 
-**2.3 Agente novo: `guia`**
-- Só enxerga essa ferramenta. O orquestrador aprende: "como chego", "o que fazer em", "onde comer" → guia.
-- Entra no `REGISTRO` com `ligada: false` e só liga quando a prova passar.
+**2.3 Agente novo: `guia`** — feito em 08/11 com internet e clima (F28, ver `docs/AGENCIA.md`). O 2.1 e o 2.2 continuam valendo: uma fonte fixa dá resposta mais estável que a busca.
 
 ---
 

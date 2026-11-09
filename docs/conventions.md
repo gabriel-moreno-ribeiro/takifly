@@ -11,9 +11,9 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-11-04T20:47:43Z }
 
 - O modelo decide o que é difuso (entender o pedido, escrever a resposta). Conta, data, regra e filtro são código.
 - Preço, horário, duração e link só chegam ao Slack depois do `brain/checker.ts`. Nunca troque uma conferência de código por um segundo modelo.
-- Ferramenta nova entra no `REGISTRO` (`brain/tools.ts`) com `ligada: false` e só liga quando a família dela passa na prova.
+- Ferramenta nova entra no `REGISTRO` (`brain/tools.ts`) com `ligada: false` e só liga quando a família dela passa na prova. Exceção: um agente novo inteiro entra com as ferramentas ligadas (o `npm test` exige que todo agente tenha uma), e o portão vira o PR, que só vai para a `main` depois da família dele passar.
 - Passo novo do `docs/AGENCIA.md` ganha cenários novos em `quality/scenarios.ts`. Os `novo-*` já foram vistos pelos modelos.
-- Mudou nó, aresta ou campo do estado em `brain/graph.ts` ou `brain/price-watch.ts`: atualize o cabeçalho do arquivo, que é a planta do grafo, e regenere o desenho (`MEMORIA=:memory: node brain/graph.ts` ou `node brain/price-watch.ts --desenho`).
+- Mudou nó, aresta ou campo do estado em `brain/graph.ts` ou `brain/price-watch.ts`: atualize o cabeçalho do arquivo, que é a planta do grafo, e regenere o desenho (`MEMORIA=:memory: node brain/graph.ts` ou `node brain/price-watch.ts --desenho`). Nó novo ou removido em `brain/graph.ts` também muda o desenho do painel ao vivo, `brain/live.html` (o `npm test` confere).
 - `Send` ou subgrafo só depois de trocar o reducer dos campos que dois nós escreveriam juntos (`campo()` sobrescreve) e de lembrar que as buscas no Google são uma por vez.
 
 # Pastas
@@ -47,7 +47,7 @@ Os valores ficam só no `.env`, que nunca vai para o git. Cite só os nomes.
 | Nome | Quem lê | Obrigatória |
 |---|---|---|
 | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | `bot.ts`, `watcher.ts` | sim |
-| `OLLAMA_API_KEY` | `brain/graph.ts`, `quality/style-judge.ts` | sim |
+| `OLLAMA_API_KEY` | `brain/graph.ts`, `quality/style-judge.ts`, `sources/web.ts` (a busca na internet usa a mesma chave) | sim |
 | `PLANILHA_VIVA_URL` | `sources/spreadsheet.ts`, `brain/price-watch.ts` | para a planilha |
 | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | `brain/tracing.ts`, `quality/failures.ts` | não: sem elas nada é enviado |
 | `EMAIL_CHAVE`, `EMAIL_DE`, `EMAIL_PARA` | `sources/email.ts` | não: sem elas o e-mail fica desligado |

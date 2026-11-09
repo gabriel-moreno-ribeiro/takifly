@@ -12,10 +12,13 @@ import { apagarPreferencia, cancelarMonitoramento, criarMonitoramento, type Doss
 import { buscarHospedagem, conferirPedido as conferirPedidoDeHospedagem, resumirHospedagens } from "../sources/hotels.ts";
 import { criarPlanilha, horas } from "../sources/spreadsheet.ts";
 import { buscarVoos, precoEquivalente, type Voo } from "../sources/flights.ts";
+import { pesquisarNaWeb, resumirAchados } from "../sources/web.ts";
+import { descreverClima, verClima } from "../sources/weather.ts";
+import { regrasDeEntrada } from "../rules/rules.ts";
 
 // ---------- SERVIÇOS DE FORA ----------
 // o que sai do Mac fica neste objeto para a prova (exam.ts) poder trocar por versões de mentira
-export const servicos = { buscarVoos, buscarHospedagem, criarPlanilha, esperar: (ms: number) => new Promise((pronto) => setTimeout(pronto, ms)) };
+export const servicos = { buscarVoos, buscarHospedagem, criarPlanilha, pesquisarNaWeb, verClima, esperar: (ms: number) => new Promise((pronto) => setTimeout(pronto, ms)) };
 
 // ---------- O AVISO DE PROGRESSO DA BUSCA ----------
 // o responder (graph.ts) guarda aqui, por conversa, a função que edita o aviso no Slack; a busca grande usa para a barra.
@@ -753,6 +756,37 @@ const guardarDocumentos = tool(
 	},
 );
 
+// ---------- AS FERRAMENTAS DO GUIA ----------
+// as duas que olham para fora dos voos: o clima medido e a internet. O texto que volta delas é de fora
+// e já chega limpo e marcado como dado (sources/web.ts, sources/weather.ts)
+const verClimaFerramenta = tool(
+	async ({ cidade }) => descreverClima(await servicos.verClima(cidade)),
+	{
+		name: "ver_clima",
+		description: "Mostra a temperatura de agora e a previsão dos próximos 7 dias de uma cidade, com dados medidos. Use para temperatura, frio, calor, chuva ou previsão do tempo. Para o clima típico de um mês mais distante, use buscar_na_web. Devolve o lugar achado, a temperatura agora e a mínima, a máxima e a chance de chuva de cada dia.",
+		schema: z.object({ cidade: z.string().describe("O nome da cidade em inglês, como New York, Lisbon ou Munich. Se houver outra cidade com o mesmo nome, ponha o país depois de vírgula: Paris, France") }),
+	},
+);
+
+// visto e vacina são regra, e regra é código: a mesma tabela que o nó conferir usa (rules/rules.ts)
+const regrasDeEntradaFerramenta = tool(
+	async ({ pais }) => regrasDeEntrada(pais) ?? `"${pais}" não está na tabela de regras de entrada. Pesquise com buscar_na_web.`,
+	{
+		name: "regras_de_entrada",
+		description: "Diz se um brasileiro precisa de visto para um país, por quanto tempo pode ficar e se o país exige a vacina de febre amarela, pela tabela do bot. Use antes de buscar_na_web sempre que a pergunta for visto ou vacina de um país. Não serve para passaporte de outro país. Devolve a regra e a fonte; se o país não estiver na tabela, diz para buscar na internet.",
+		schema: z.object({ pais: z.string().describe("O nome do país por extenso, como Japão ou Estados Unidos") }),
+	},
+);
+
+const buscarNaWebFerramenta = tool(
+	async ({ pergunta }) => resumirAchados(pergunta, await servicos.pesquisarNaWeb(pergunta)),
+	{
+		name: "buscar_na_web",
+		description: "Pesquisa na internet uma dúvida de viagem: visto e vacina que a tabela não tem, regra de passaporte, seguro, moeda, tomada, fuso, idioma, segurança, transporte do aeroporto, o que fazer, clima típico de uma época. Escreva uma pergunta curta e completa, com o país ou a cidade. Não use para preço de voo ou de hotel: isso é buscar_voos e buscar_hoteis. Devolve as páginas achadas, cada uma com título, link e um trecho do texto.",
+		schema: z.object({ pergunta: z.string().describe("A pergunta da busca, curta e com o lugar, como: brasileiro precisa de visto para o Japão") }),
+	},
+);
+
 // ---------- O REGISTRO ----------
 // uma linha por ferramenta: de qual agente ela é, se está ligada, e quantas vezes pode ser chamada em um pedido.
 // É o único lugar que diz isso: o agents.ts monta a lista de cada agente daqui, e o nó ferramentas (graph.ts)
@@ -782,6 +816,10 @@ export const REGISTRO = [
 	{ ferramenta: listarPreferenciasFerramenta, agente: "memoria", ligada: true, maxPorPedido: 3 },
 	{ ferramenta: apagarPreferenciaFerramenta, agente: "memoria", ligada: true, maxPorPedido: 5 },
 	{ ferramenta: guardarDocumentos, agente: "memoria", ligada: true, maxPorPedido: 3 },
+
+	{ ferramenta: verClimaFerramenta, agente: "guia", ligada: true, maxPorPedido: 3 },
+	{ ferramenta: regrasDeEntradaFerramenta, agente: "guia", ligada: true, maxPorPedido: 3 },
+	{ ferramenta: buscarNaWebFerramenta, agente: "guia", ligada: true, maxPorPedido: 3 },
 ];
 
 // todas, ligadas ou não: a prova chama qualquer uma pelo nome

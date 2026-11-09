@@ -11,6 +11,9 @@ node takifly.ts status     mostra se estão rodando
 node takifly.ts stop       desliga os dois de vez
 ```
 
+Com o bot ligado, **http://localhost:4500** mostra o grafo ao vivo: cada nó acende na hora em que roda,
+com o que ele decidiu e quanto levou (`brain/live.ts`). Só abre no próprio Mac.
+
 Antes de reiniciar, `node quality/tests.ts` tem que dizer **Tudo certo!**.
 
 ## As pastas

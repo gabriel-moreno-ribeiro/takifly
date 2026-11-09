@@ -279,6 +279,15 @@
 			"notes": "auditoria do harness em 2026-11-08 (A5, o segundo passo); aula 11; FUTURE 7.6. Só no quality/exam.ts, como o H26: o brain/tracing.ts roda no bot e no vigia. Antes, conferir se a Ollama Cloud devolve o usage"
 		},
 		{
+			"id": "H31",
+			"area": "harness",
+			"behavior": "Painel ao vivo: com o bot ligado, http://localhost:4500 mostra o grafo e acende cada nó na hora em que ele roda, com o que cada um decidiu, para qualquer conversa do Slack. Só escuta no próprio Mac e nunca derruba o bot.",
+			"verification": "grep -q \"export function ouvinteAoVivo\" brain/live.ts && grep -q \"O PAINEL AO VIVO\" quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit: Tudo certo!",
+			"notes": "pedido da pessoa em 2026-11-08: ver em tempo real o que o bot faz, mais visual que o Langfuse. Sem dependência nova; os prontos do GitHub são de Python"
+		},
+		{
 			"id": "F01",
 			"area": "brain",
 			"behavior": "O orquestrador monta o plano e cada especialista (memoria, monitor, pesquisador, analista) só vê as próprias ferramentas; contas e filtros são código.",
@@ -348,7 +357,7 @@
 			"verification": "grep -q 'read_travel_guide' brain/tools.ts && node quality/exam.ts guia",
 			"state": "not_started",
 			"evidence": "",
-			"notes": "FUTURE 2.2 e 2.3; depende de F34 (o sources/guide.ts do FUTURE 2.1)"
+			"notes": "FUTURE 2.1 e 2.2. O agente guia nasceu em 2026-11-08 com internet e clima (F28); falta só a fonte fixa do Wikivoyage, que dá resposta mais estável que a busca"
 		},
 		{
 			"id": "F09",
@@ -511,6 +520,15 @@
 			"state": "passing",
 			"evidence": "2026-11-08, commit 51b6b8a com mudanças sem commit: Tudo certo!",
 			"notes": "aula 07; docs/lessons-ibm.md (condição de parada verificável). Hoje criarEspecialista sai por contagem (PASSOS_POR_AGENTE) ou por \"pronto\""
+		},
+		{
+			"id": "F28",
+			"area": "brain",
+			"behavior": "Agente guia: responde dúvidas de viagem que não são preço com dados de fora. ver_clima dá o tempo agora e a previsão de 7 dias (Open-Meteo); regras_de_entrada dá visto e vacina pela tabela do bot; buscar_na_web pesquisa o resto (busca da Ollama, mesma chave). Texto de página chega limpo e marcado como dado, não prova preço em R$, e o redator cita a fonte.",
+			"verification": "grep -q \"buscar_na_web\" brain/tools.ts && node quality/tests.ts && node quality/exam.ts guia-",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 3dc2fef com mudanças sem commit: Nota de glm-5.3+glm-5.3-flash: 14 de 14",
+			"notes": "pedido da pessoa em 2026-11-08; FUTURE 2.3. A verificação gasta crédito: 14 cenários guia-. Open-Meteo grátis é só para uso não comercial"
 		},
 		{
 			"id": "F30",
