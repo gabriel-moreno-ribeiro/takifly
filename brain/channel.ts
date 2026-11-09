@@ -10,7 +10,7 @@
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 
-import { Decisao, INSTRUCOES_DO_JUIZ } from "./agents.ts";
+import { CRITERIOS_DO_JUIZ, Decisao, DECISOES_DO_JUIZ, INSTRUCOES_DO_JUIZ, PERGUNTA_DO_JUIZ } from "./agents.ts";
 import { explicarErro } from "./checker.ts";
 import { compactar, excluir, retratoDaConversa, retratoParaSlack } from "./context.ts";
 import { listarConversas, modelos, responder as responderDeVerdade } from "./graph.ts";
@@ -125,13 +125,49 @@ const relogioDeVerdade: Relogio = {
 	},
 };
 
-type Opcoes = { responder?: typeof responderDeVerdade; relogio?: Relogio };
+// ---------- O JEV ----------
+// O juiz roda no Jev, o modelo de classificação da TypeSafe: ele não escreve texto, só escolhe uma das quatro
+// decisões e diz a confiança, em bem menos de 1 s (o modelo barato da Ollama levava segundos). O formato vem do
+// pacote oficial @typesafe-ai/sdk 0.7.0 (POST /v1/systemone), chamado aqui com fetch, sem instalar o pacote.
+// Sem TYPESAFE_API_KEY no .env, o juiz continua no modelo barato da Ollama.
+const MODELO_DO_JEV = "jev-latest";
+type DecisaoDoJuiz = { decisao: (typeof DECISOES_DO_JUIZ)[number]; motivo: string };
+export type Jev = (emAndamento: string, nova: string, sinal: AbortSignal) => Promise<DecisaoDoJuiz>;
+
+export function pedidoAoJev(emAndamento: string, nova: string) {
+	return {
+		model: MODELO_DO_JEV,
+		state: { pedido_em_andamento: emAndamento, mensagem_nova: nova },
+		questions: { decisao: { type: "choice", instructions: PERGUNTA_DO_JUIZ, criteria: CRITERIOS_DO_JUIZ } },
+	};
+}
+
+export function lerRespostaDoJev(resposta: any): DecisaoDoJuiz {
+	const { choice, confidence } = resposta?.answers?.decisao ?? {};
+	if (!DECISOES_DO_JUIZ.includes(choice)) throw new Error(`o Jev respondeu sem uma decisão válida (${JSON.stringify(choice)})`);
+	return { decisao: choice, motivo: typeof confidence === "number" ? `Jev, ${Math.round(confidence * 100)}% de confiança` : "Jev, sem confiança" };
+}
+
+const perguntarAoJev: Jev = async (emAndamento, nova, sinal) => {
+	const resposta = await fetch("https://api.typesafe.ai/v1/systemone", {
+		method: "POST",
+		headers: { Authorization: `Bearer ${process.env.TYPESAFE_API_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
+		body: JSON.stringify(pedidoAoJev(emAndamento, nova)),
+		signal: sinal,
+	});
+	// o corpo do erro pode trazer o estado enviado (a mensagem da pessoa): para o log, só o código
+	if (!resposta.ok) throw new Error(`o Jev respondeu com erro ${resposta.status}`);
+	return lerRespostaDoJev(await resposta.json());
+};
+
+type Opcoes = { responder?: typeof responderDeVerdade; relogio?: Relogio; jev?: Jev };
 
 const novoPedido = (textos: string[]): Pedido => ({ tipo: "pedido", textos, controle: new AbortController(), fase: "fila" });
 
 export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 	const responder = opcoes.responder ?? responderDeVerdade;
 	const relogio = opcoes.relogio ?? relogioDeVerdade;
+	const jev = opcoes.jev ?? (process.env.TYPESAFE_API_KEY ? perguntarAoJev : null);
 	const canais = new Map<string, EstadoDoCanal>();
 
 	const doCanal = (canal: string) => {
@@ -217,7 +253,7 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 	}
 
 	// ---------- O JUIZ ----------
-	// a resposta do modelo passa pelo zod (Decisao); qualquer erro, ou o prazo vencendo, vira fila
+	// o Jev, ou sem a chave dele o modelo barato (a resposta passa pelo zod, Decisao); qualquer erro, ou o prazo vencendo, vira fila
 	async function julgar(canal: string, emAndamento: string, nova: string) {
 		let pararPrazo = () => {};
 		const desistir = new AbortController();    // o prazo venceu: a chamada ao modelo para, e não gasta crédito à toa
@@ -228,8 +264,10 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 					falhar(new Error(`passou de ${PRAZO_DO_JUIZ / 1000} s`));
 				});
 			});
-			const juiz = modelos.especialista.withStructuredOutput(Decisao, { name: "decidir", method: "functionCalling" });
-			const chamada = juiz.invoke([new SystemMessage(INSTRUCOES_DO_JUIZ), new HumanMessage(`Pedido em andamento:\n${emAndamento}\n\nMensagem nova:\n${nova}`)], { callbacks: rastrear(canal, rotuloDosModelos()), signal: desistir.signal });
+			const chamada = jev
+				? jev(emAndamento, nova, desistir.signal)
+				: modelos.especialista.withStructuredOutput(Decisao, { name: "decidir", method: "functionCalling" })
+					.invoke([new SystemMessage(INSTRUCOES_DO_JUIZ), new HumanMessage(`Pedido em andamento:\n${emAndamento}\n\nMensagem nova:\n${nova}`)], { callbacks: rastrear(canal, rotuloDosModelos()), signal: desistir.signal });
 			chamada.catch(() => {});    // se o prazo vencer antes, o erro que vier depois não pode derrubar o bot
 			return { ...(await Promise.race([chamada, prazo])), certo: true };
 		} catch (erro: any) {
