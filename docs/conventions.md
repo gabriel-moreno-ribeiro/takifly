@@ -26,6 +26,12 @@ Uma pasta é um trabalho (tabela no `README.md`). `rules/`, `sources/` e `storag
 - Testes com `node:assert`, sem framework. `.env` lido por `process.loadEnvFile`, sem `dotenv`. Banco pelo SQLite do próprio Node.
 - Mudar qualquer uma dessas decisões é conversa com a pessoa antes.
 
+# Travas do Claude Code
+
+O `.claude/` faz das regras do `AGENTS.md` uma trava, e não só texto. O `settings.json` nega `Read` e `Edit` (o `Edit` vale também para `Write`) de `.env`, `data/` e `logs/`, e liga um hook `PreToolUse` no Bash: o `.claude/hooks/guarda.ts` pede o ok da pessoa antes de `node takifly.ts start|stop|restart` e de `launchctl` com os serviços `com.takifly.*`, da prova paga (`exam.ts`, `style-judge.ts`, `failures.ts`, de qualquer pasta), de `CREDITO=1` e de comando que use `.env`, `data/` ou `logs/`. Sem a barra, `data` e `logs` só contam como argumento de quem mexe em arquivo (`rm -rf data`, `ls logs`), porque "data" também é o dia da viagem: `grep data` e um commit com a palavra passam. Ler esses arquivos de código com `sed`, `grep`, `cat` ou `git diff` passa. O `.claude/agents/revisor.md` é o revisor independente, sem `Edit` nem `Write`. O bloco A GUARDA DO CLAUDE do `quality/tests.ts` confere os comandos.
+
+Falta conferir numa sessão nova se o "ask" do hook aparece no modo bypass (as sessões daqui rodam nele). Se não aparecer, troque por "deny" com o motivo "peça à pessoa".
+
 # Escrita
 
 - Código, comentários, docs e mensagens em português do Brasil. Nomes de arquivo de harness em inglês; chaves de JSON em inglês, valores em português.
@@ -47,4 +53,5 @@ Os valores ficam só no `.env`, que nunca vai para o git. Cite só os nomes.
 | `EMAIL_CHAVE`, `EMAIL_DE`, `EMAIL_PARA` | `sources/email.ts` | não: sem elas o e-mail fica desligado |
 | `MODELO`, `DADOS`, `MEMORIA` | grafo, banco e checkpoint | não: trocam modelo e bancos (`:memory:` nos testes e na prova) |
 | `MODELO_FORTE`, `MODELO_ESPECIALISTA` | `brain/models.ts` (grafo, prova, juiz de escrita e painel leem dali) | não: sem elas, o forte é `glm-5.3` e o barato `glm-5.3-flash`, escolha da pessoa em 08/11. O forte é do orquestrador e do redator; o barato, dos especialistas e dos agentes de contexto e de memória. `MODELO` troca os dois |
-| `PARTE`, `CENARIOS`, `AMOSTRA`, `RESULTADOS`, `REJULGAR`, `JUIZ` | `quality/exam.ts`, `quality/style-judge.ts` | não: os cabeçalhos desses arquivos explicam |
+| `PARTE`, `CENARIOS`, `AMOSTRA`, `RESULTADOS`, `REJULGAR`, `REFAZER`, `JUIZ` | `quality/exam.ts`, `quality/style-judge.ts` | não: os cabeçalhos desses arquivos explicam |
+| `CREDITO` | `quality/verify-feature.ts` | não: `CREDITO=1` libera item com a prova na `verification`, só com o ok da pessoa |

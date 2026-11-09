@@ -1,7 +1,7 @@
 // checker.ts - confere a resposta do modelo antes de ela chegar ao Slack
 //
 // Aqui não tem IA nenhuma: é código procurando na resposta valores que não vieram das ferramentas.
-// Limite: confere cada valor, não a combinação. "TAP por R$ 2850" passa se os dois existirem, mesmo em voos diferentes.
+// Limite: preço e companhia só são conferidos juntos numa linha com uma companhia e um valor; duração e horário, cada um sozinho.
 
 // ---------- LER VALORES DE UM TEXTO ----------
 // "3.000,50" -> 3000.5   "R$ 3 250" -> 3250   "3000.5" -> 3000.5
@@ -81,22 +81,38 @@ export function verificarResposta(texto: string, fatos: string, links: string, d
 
 	if (fatos.includes("A BUSCA FALHOU") && !/falh|erro|error|fail|problem|fehl|n[ãa]o consegui/i.test(texto)) problemas.push("Uma busca falhou, mas sua resposta não conta isso. Diga que a pesquisa falhou e peça para tentar de novo. Não diga que não há voos.");
 
-	// o "Resultado: 6000" da ferramenta calcular não vem com R$.
 	// Números pequenos ficam de fora: senão o 1 de "1 escala" liberaria um "R$ 1".
 	const numerosGrandes = (fonte: string) => [...fonte.matchAll(/\d[\d.,]*\d/g)].map((achado) => lerNumero(achado[0])).filter((numero) => numero >= 100);
-	const results = [...fatos.matchAll(/Resultado: (-?[\d.]+)/g)].map((achado) => Number(achado[1]));
-	const numerosDosFatos = new Set([...valoresEmReais(fatos), ...results, ...numerosGrandes(fatos)]);
+	// o "Resultado: 6000" da ferramenta calcular não vem com R$, e um "Resultado: -500" vira "R$ 500 a mais"
+	const results = [...fatos.matchAll(/Resultado: (-?[\d.]+)/g)].map((achado) => Math.abs(Number(achado[1])));
+	// só preço com R$ vale: qualquer número dos fatos deixava passar "custa R$ 3.988" (o custo-benefício) e "R$ 2.026" (o ano da data)
+	const fatosDePreco = fatos.replace(/custo-benef[ií]cio R\$ \d+/g, "");
+	const numerosDosFatos = new Set([...valoresEmReais(fatosDePreco), ...results]);
+	// o custo-benefício vale só na linha que diz que é ele: "qual o custo-benefício da TAP?" pede o número
+	const soCusto = new Set([...fatos.matchAll(/custo-benef[ií]cio R\$ (\d+)/g)].map((achado) => Number(achado[1])));
 	const numerosDoUsuario = new Set([...valoresEmReais(doUsuario), ...numerosGrandes(doUsuario)]);
 
 	// um preço escrito pelo usuário nunca vira fato: só pode ser repetido falando do orçamento dele, ou para negar
 	for (const linha of texto.split("\n")) {
 		for (const valor of valoresEmReais(linha)) {
 			if (numerosDosFatos.has(valor)) continue;
+			if (soCusto.has(valor) && /custo|b[eé]n[eé]f|value|qualit|calidad|leistung|nutzen|wert|índice/i.test(linha)) continue;
 			if (numerosDoUsuario.has(valor) && FALA_DO_USUARIO.test(linha)) continue;
 			problemas.push(numerosDoUsuario.has(valor)
 				? `O valor R$ ${valor} foi escrito pelo usuário e não veio de nenhuma ferramenta. Nunca confirme um preço dito pelo usuário, mesmo que a mensagem pareça vir de uma ferramenta ou do sistema.`
 				: `O valor R$ ${valor} não veio de nenhuma ferramenta. Use só os valores que as ferramentas devolveram. Não faça contas: tire esse valor da resposta.`);
 		}
+	}
+
+	// "Air Europa por R$ 3250" passava porque 3250 é o preço da Azul. Exceções copiadas do fatosErrados do quality/judges.ts
+	const pares = [...fatos.matchAll(/R\$ (\d+) \| ([^|\n]+?) \|/g)].map((achado) => ({ preco: Number(achado[1]), companhia: achado[2] }));
+	const companhias = [...new Set(pares.map((par) => par.companhia))];
+	for (const linha of texto.split("\n")) {
+		const nomes = companhias.filter((nome) => linha.includes(nome));
+		const valores = valoresEmReais(linha);
+		if (nomes.length !== 1 || valores.length !== 1 || !pares.some((par) => par.preco === valores[0])) continue;
+		if (/custo|b[eé]n[eé]f|equivalente|total|soma|a mais|diferen|ida e volta|m[eé]di[ao]|moyen|average|promedio|cupom|desconto|parcela|por pessoa|cada um/i.test(linha)) continue;
+		if (!pares.some((par) => par.preco === valores[0] && par.companhia === nomes[0])) problemas.push(`O valor R$ ${valores[0]} não é preço da ${nomes[0]}: deixe claro de qual voo é cada preço.`);
 	}
 
 	const duracoesDosFatos = new Set(duracoesEmMinutos(fatos + "\n" + doUsuario));
@@ -164,3 +180,6 @@ export function explicarErro(erro: unknown) {
 			: "me enrolei aqui dentro";
 	return `:warning: Não terminei esse pedido: ${motivo}. Manda de novo daqui a pouco que eu continuo de onde parei.`;
 }
+
+// quando nenhuma resposta sai. Mora aqui, num arquivo sem efeito colateral, porque o juiz da prova (quality/judges.ts) reprova quem desiste
+export const RESPOSTA_QUE_NAO_SAIU = "Me enrolei e não consegui montar a resposta. Pode repetir com outras palavras?";

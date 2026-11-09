@@ -15,7 +15,12 @@ import { buscarVoos, precoEquivalente, type Voo } from "../sources/flights.ts";
 
 // ---------- SERVIÇOS DE FORA ----------
 // o que sai do Mac fica neste objeto para a prova (exam.ts) poder trocar por versões de mentira
-export const servicos = { buscarVoos, buscarHospedagem, criarPlanilha };
+export const servicos = { buscarVoos, buscarHospedagem, criarPlanilha, esperar: (ms: number) => new Promise((pronto) => setTimeout(pronto, ms)) };
+
+// ---------- O AVISO DE PROGRESSO DA BUSCA ----------
+// o responder (graph.ts) guarda aqui, por conversa, a função que edita o aviso no Slack; a busca grande usa para a barra.
+// Um pedido por vez em cada conversa (a fila do bot.ts), então a chave conversa basta
+export const avisosDaBusca = new Map<string, (texto: string) => unknown>();
 
 // ---------- O CADERNO ----------
 // o que as ferramentas leem e escrevem enquanto o nó "ferramentas" roda; no fim, o nó copia para o Estado do grafo
@@ -34,7 +39,13 @@ function cadernoDe(config: any): Caderno {
 	return config.configurable.caderno;
 }
 
-const LIMITE_DE_BUSCAS = 12;    // um modelo em loop não pode martelar o Google
+// não há limite de buscas por pedido: pedido grande só demora mais. Depois das primeiras, o bot vai com calma,
+// porque busca demais seguida faz o Google responder "erro 429" e recusar por um tempo (o vigia usa o mesmo Google)
+const BUSCAS_SEM_PAUSA = 12;
+const PAUSA_ENTRE_BUSCAS = 3_000;
+const PAUSA_DEPOIS_DO_429 = 30_000;
+const BUSCAS_PARA_A_BARRA = 6;    // a partir daqui a busca mostra a barra e avisa que vai demorar
+const CHAMADAS_DE_BUSCA_POR_PEDIDO = 12;    // a trava contra o modelo em loop: conta chamadas da ferramenta, não buscas
 
 // ---------- DATAS ----------
 // hojeEmSaoPaulo e somarDias moram em rules/dates.ts; o export abaixo mantém quem já importa daqui funcionando
@@ -186,10 +197,16 @@ export function resumirVoos(voos: Voo[]) {
 async function pesquisar(caderno: Caderno, origem: string, destino: string, data: string, adultos: number, criancas: number, classe: string) {
 	const chave = [origem, destino, data, adultos, criancas, classe].join("|");
 	if (caderno.buscas.includes(chave)) return null;
-	if (caderno.buscas.length >= LIMITE_DE_BUSCAS) throw new Error(`limite de ${LIMITE_DE_BUSCAS} buscas por pedido. Responda com o que já tem.`);
+	if (caderno.buscas.length >= BUSCAS_SEM_PAUSA) await servicos.esperar(PAUSA_ENTRE_BUSCAS);
 	caderno.buscas.push(chave);
 
-	const voos = await servicos.buscarVoos(origem, destino, data, adultos, criancas, classe);
+	const buscar = () => servicos.buscarVoos(origem, destino, data, adultos, criancas, classe);
+	// o Google pediu calma: espera e tenta uma vez mais. Se recusar de novo, vira "A BUSCA FALHOU" como qualquer erro
+	const voos = await buscar().catch(async (erro) => {
+		if (!/erro 429/.test(erro.message)) throw erro;
+		await servicos.esperar(PAUSA_DEPOIS_DO_429);
+		return buscar();
+	});
 	// se o mesmo trecho for pesquisado de novo, ficam só os preços mais recentes
 	const outroTrecho = (voo: Voo) => voo.origem !== origem || voo.destino !== destino || voo.data !== data;
 	caderno.voos = [...caderno.voos.filter(outroTrecho), ...voos];
@@ -197,14 +214,27 @@ async function pesquisar(caderno: Caderno, origem: string, destino: string, data
 	return voos;
 }
 
+// "▓▓▓░░░░░░░ 9 de 21": o aviso que a pessoa vê enquanto uma busca grande anda. faltaMs é a estimativa pelo ritmo até agora
+export function barraDaBusca(feitas: number, total: number, agora: string, faltaMs: number | null) {
+	const cheios = Math.round((feitas / total) * 10);
+	const falta = faltaMs === null ? "" : faltaMs < 60_000 ? " · falta menos de 1 min" : ` · falta uns ${Math.round(faltaMs / 60_000)} min`;
+	return `:taki: Esse pedido é grande: são ${total} buscas no Google. Vou com calma, então dessa vez demora um pouquinho mais.\n${"▓".repeat(cheios)}${"░".repeat(10 - cheios)} ${feitas} de ${total} · ${agora}${falta}`;
+}
+
 // um aeroporto com erro não derruba os outros: a resposta conta o que deu certo e o que falhou
 async function pesquisarVarios(caderno: Caderno, origens: string[], destinos: string[], datas: string[], adultos: number, criancas: number, classe: string) {
 	if (origens.some((origem) => destinos.includes(origem))) throw new Error("a origem e o destino são o mesmo lugar. Avise e pergunte o destino certo.");
 	const achados: Voo[] = [];
 	const avisos: string[] = [];
+	const total = datas.length * origens.length * destinos.length;
+	const avisar = total >= BUSCAS_PARA_A_BARRA ? avisosDaBusca.get(caderno.conversa) : undefined;
+	const comeco = Date.now();
+	let feitas = 0;
 	for (const data of datas) {
 		for (const origem of origens) {
 			for (const destino of destinos) {
+				await avisar?.(barraDaBusca(feitas, total, `${origem}→${destino} em ${data.slice(8, 10)}/${data.slice(5, 7)}`, feitas > 1 ? ((Date.now() - comeco) / feitas) * (total - feitas) : null));
+				feitas++;
 				try {
 					const voos = await pesquisar(caderno, origem, destino, data, adultos, criancas, classe);
 					if (voos === null) achados.push(...caderno.voos.filter((voo) => voo.origem === origem && voo.destino === destino && voo.data === data));
@@ -342,13 +372,19 @@ const buscarVoosFerramenta = tool(
 );
 
 const calcular = tool(
-	async ({ operacao, valores }) => {
+	async ({ operacao, valores }, config) => {
 		const contas = {
 			soma: (a: number, b: number) => a + b,
 			subtracao: (a: number, b: number) => a - b,
 			multiplicacao: (a: number, b: number) => a * b,
 			divisao: (a: number, b: number) => a / b,
 		};
+		// preço vezes os passageiros da própria busca é o erro "Total R$ 55.520" da prova (busca de 2 adultos, × 2), e o "Resultado:" vira fato.
+		// Busca de 1 adulto × 4 é a conta certa do conta-quatro-pessoas, por isso só o número da busca é recusado.
+		// shortcut: só vê as buscas deste pedido (o noPreparar zera); numa pergunta seguinte, o × 2 passa. Subir quando a prova mostrar esse caso.
+		const passageiros = new Set(cadernoDe(config).buscas.map((chave) => chave.split("|")).map(([, , , adultos, criancas]) => Number(adultos) + Number(criancas)).filter((total) => total > 1));
+		const repetido = valores.find((valor) => passageiros.has(valor));
+		if (operacao === "multiplicacao" && repetido && valores.some((valor) => valor >= 100)) throw new Error(`os preços dos voos já são o total dos ${repetido} passageiros pesquisados: não multiplique pelo número de pessoas. Use o preço como veio.`);
 		// média é soma e divisão: sem ela aqui, o analista fazia a conta de cabeça e o verificador recusava
 		const resultado = operacao === "media" ? valores.reduce(contas.soma) / valores.length : valores.reduce(contas[operacao]);
 		if (!Number.isFinite(resultado)) throw new Error("essa conta não tem resultado");
@@ -356,7 +392,7 @@ const calcular = tool(
 	},
 	{
 		name: "calcular",
-		description: "Faz uma conta com dois ou mais números: soma, subtracao, multiplicacao, divisao ou media. Use para toda conta de preço: por pessoa, total de passageiros, diferença entre dois preços, média dos voos. Para somar ida e volta de voos já pesquisados, use somar_ida_e_volta; para diferença de tempo de voo, use comparar_duracoes. Devolve o resultado com duas casas decimais.",
+		description: "Faz uma conta com dois ou mais números: soma, subtracao, multiplicacao, divisao ou media. Use para toda conta de preço: por pessoa, diferença entre dois preços, média dos voos. Os preços dos voos já são o total de todos os passageiros pesquisados: não multiplique pelo número de pessoas da busca. Para somar ida e volta de voos já pesquisados, use somar_ida_e_volta; para diferença de tempo de voo, use comparar_duracoes. Devolve o resultado com duas casas decimais.",
 		schema: z.object({
 			operacao: z.enum(["soma", "subtracao", "multiplicacao", "divisao", "media"]),
 			valores: z.array(z.coerce.number()).min(2),
@@ -726,7 +762,7 @@ const guardarDocumentos = tool(
 // Os limites são escolha nossa: a busca de hotel não tinha limite nenhum, e um modelo em loop podia pedir
 // 20 buscas no Google Hotels numa resposta só. Mude à mão se a prova mostrar que algum aperta.
 export const REGISTRO = [
-	{ ferramenta: buscarVoosFerramenta, agente: "pesquisador", ligada: true, maxPorPedido: LIMITE_DE_BUSCAS },
+	{ ferramenta: buscarVoosFerramenta, agente: "pesquisador", ligada: true, maxPorPedido: CHAMADAS_DE_BUSCA_POR_PEDIDO },
 	{ ferramenta: buscarHospedagemFerramenta, agente: "pesquisador", ligada: true, maxPorPedido: 3 },
 	{ ferramenta: listarAeroportos, agente: "pesquisador", ligada: true, maxPorPedido: 4 },
 	{ ferramenta: diaDaSemanaFerramenta, agente: "pesquisador", ligada: true, maxPorPedido: 4 },

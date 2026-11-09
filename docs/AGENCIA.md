@@ -173,8 +173,21 @@ Revisão independente em 08/11 (um agente que não sabia das minhas conclusões)
 versão; os 10 foram consertados, cada um com o seu teste. O mais grave: as preferências entravam na mesma lista
 que a trava da data inventada lê, e "mora em Natal" soltava qualquer data. Agora elas valem só para o lugar.
 
-O que ainda não foi medido: a prova (`quality/exam.ts`) com um modelo barato de verdade nos especialistas.
-Gasta crédito, então é a pessoa que decide quando rodar.
+Medido em 08/11: a prova (`quality/exam.ts`) com o glm-5.3 no forte e o glm-5.3-flash nos especialistas deu
+278/284. As causas das falhas estão em `docs/progress.md`.
+
+Auditoria do harness, também em 08/11: mudanças no bot, cada uma com teste e sem crédito. O efeito nas respostas
+reais só a prova mede (o próximo passo em `docs/progress.md`).
+
+| Item | O que mudou | Onde |
+|---|---|---|
+| F64 | O verificador recusa preço dado à companhia errada: numa linha com uma companhia só e um valor só, o par preço e companhia tem de estar nos fatos. Linha com total, soma, média, diferença, ida e volta ou por pessoa fica de fora | `verificarResposta` em `brain/checker.ts` |
+| F65 | O custo-benefício e os números sem R$ dos fatos, como o ano, não viram preço aceito; a linha que diz que o número é o custo-benefício pode citá-lo | `verificarResposta` em `brain/checker.ts` |
+| F66 | O `calcular` recusa multiplicar um preço (100 ou mais) pelo número de passageiros de uma busca do mesmo pedido (busca de 2 adultos, × 2), porque o preço do voo já é o total deles; busca de 1 adulto × 4 continua valendo | `calcular` em `brain/tools.ts` |
+| F67 | Passar do limite de 12 buscas vira "não pesquisei ...: passou do limite", e não "A BUSCA FALHOU", para a resposta não pedir para tentar de novo | `pesquisarVarios` em `brain/tools.ts` |
+| — | 08/11: o limite de 12 buscas por pedido saiu, a pedido da pessoa. Depois de 12 buscas o bot espera 3 s entre uma e outra; no "erro 429" do Google espera 30 s e tenta uma vez mais. A partir de 6 buscas numa chamada, o aviso no Slack vira uma barra ("▓▓▓░░░░░░░ 9 de 21 · falta uns 2 min"). A trava contra loop do modelo continua: 12 chamadas de `buscar_voos` | `pesquisar`, `pesquisarVarios` e `barraDaBusca` em `brain/tools.ts` |
+| F68 | "São José" sozinho pergunta qual é (SJK, SJP, SJC ou SJO); "São José dos Campos" continua indo direto | `PERGUNTAR` em `rules/airports.ts` |
+| F69 | Se a retomada de um pedido que caiu quebra de novo, o bot avisa a pessoa, anota `retomada_falhou` no Langfuse e segue com a mensagem nova, em vez de prender o canal | `responder` em `brain/graph.ts` |
 
 ### Workflow ou agente: o que é o quê neste bot (decidido em 08/11)
 

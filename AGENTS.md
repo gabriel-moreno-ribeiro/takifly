@@ -9,6 +9,7 @@ Bot de viagens no Slack (`bot.ts`) com um vigia de preços separado (`watcher.ts
 - Não rode `quality/exam.ts`, `quality/style-judge.ts` nem `quality/failures.ts` sem a pessoa pedir. Por quê: gastam crédito da Ollama e cota do Langfuse.
 - Não commite sem a pessoa pedir, e rode `git status` antes de mexer. Por quê: outra sessão do Claude pode estar editando esta pasta.
 - Nada está pronto sem `npm test` terminar em "Tudo certo!".
+- Worktree do Orca não tem `.env`: ali só `npm test` vale (o `init.sh` avisa e segue), e `node takifly.ts start` só se dá da pasta principal. Por quê: o serviço roda o código da pasta de onde foi ligado, e sem `.env` o bot cai sem parar.
 
 ## Como ler os docs
 
@@ -28,11 +29,11 @@ Abra o corpo só do doc que a tarefa pede. A tabela abaixo diz quando cada um im
 | `docs/session.md` | Ao começar e antes de parar uma sessão |
 | `feature_list.json` | Para escolher ou fechar um item; leia só o item `active` |
 | `docs/verification.md` | Antes de dizer que algo está pronto, de pedir para rodar a prova ou de reiniciar |
-| `docs/conventions.md` | Antes de mexer em `brain/`, `sources/`, `rules/`, `storage/` ou `quality/`, ou numa variável de ambiente |
+| `docs/conventions.md` | Antes de mexer em `brain/`, `sources/`, `rules/`, `storage/`, `quality/` ou `.claude/`, ou numa variável de ambiente |
 | `docs/FUTURE.md` | Para saber o porquê e onde mexe de um item (o número da seção está em `notes`) |
 | `docs/AGENCIA.md` | Antes de criar um passo novo, mudar o grafo ou uma fonte de dados |
 | `docs/lessons-harness.md` | Antes de acrescentar uma regra, um teste de harness ou uma peça nova ao processo |
 | `docs/lessons-ibm.md` | Antes de mexer em contexto, ferramentas, injeção de prompt ou custo de modelo do bot |
 | `README.md` | Para ver as pastas e os comandos de ligar e desligar |
 
-O cabeçalho de cada `.ts` diz como rodar aquele arquivo sozinho, e o de `brain/graph.ts` é a planta do grafo. `docs/manual/` é gerado e está desatualizado: não use. O curso de harness está em `../learn-harness-engineering/`, só para consulta.
+O cabeçalho de cada `.ts` diz como rodar aquele arquivo sozinho, e o de `brain/graph.ts` é a planta do grafo. `docs/manual/` é gerado e está desatualizado: não use. O curso de harness está em `/Users/ithaca3_/VS Code/Gabriel <> Ithaca W1/learn-harness-engineering/` (e no site https://walkinglabs.github.io/learn-harness-engineering/en/), só para consulta.

@@ -18,7 +18,7 @@
 // confere o que ficou atrasado.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 
 const PASTA = import.meta.dirname;
@@ -100,6 +100,11 @@ function ligadosAMao() {
 
 // ---------- OS TRÊS COMANDOS ----------
 async function start() {
+	// o serviço roda o código da pasta de onde foi ligado: sem .env (worktree do Orca), o bot cairia e o launchd religaria sem parar
+	if (!existsSync(`${PASTA}/.env`)) {
+		console.log(`Não há .env em ${PASTA} (worktree do Orca?). Nada foi desligado. Ligue da pasta principal do projeto.`);
+		process.exit(1);
+	}
 	let algumEstavaLigado = false;
 	for (const servico of SERVICOS) if (desligar(servico)) algumEstavaLigado = true;
 	if (algumEstavaLigado) await esperar(1000);    // o launchd leva um instante para soltar o serviço antigo

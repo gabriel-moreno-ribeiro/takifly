@@ -29,11 +29,11 @@
 		{
 			"id": "H03",
 			"area": "harness",
-			"behavior": "feature_list.json é validado a cada npm test: campos obrigatórios, estados válidos, no máximo um active e passing com evidência.",
+			"behavior": "feature_list.json é validado a cada npm test: campos obrigatórios, estados válidos, no máximo um active, passing com evidência e todo id (H ou F com dois dígitos) citado nas notes existe na lista.",
 			"verification": "grep -q 'LISTA DE FUNCIONALIDADES' quality/tests.ts && node quality/tests.ts",
 			"state": "passing",
-			"evidence": "2026-11-04, commit ecda5f3 com mudanças sem commit: Tudo certo!",
-			"notes": "aula 08"
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/AGENCIA.md e mais 20): Tudo certo!",
+			"notes": "aula 08. Auditoria do harness em 2026-11-08 (C6): o F08 dizia depender de um item que não existe; agora o bloco LISTA DE FUNCIONALIDADES pega id citado que não existe"
 		},
 		{
 			"id": "H04",
@@ -78,16 +78,16 @@
 			"verification": "test -z \"$(grep -rl 'from \"../brain/' rules sources storage)\" && grep -q 'FRONTEIRAS' quality/tests.ts && node quality/tests.ts",
 			"state": "passing",
 			"evidence": "2026-11-08, commit 63a4965 com mudanças sem commit: Tudo certo!",
-			"notes": "aula 10; hoje rules/rules.ts e sources/hotels.ts importam brain/tools.ts"
+			"notes": "aula 10. Feito em 08/11 (commit 2b82441): hojeEmSaoPaulo e somarDias foram para rules/dates.ts, e rules/ e sources/ não importam mais brain/"
 		},
 		{
 			"id": "H09",
 			"area": "harness",
 			"behavior": "node quality/scoreboard.ts roda sem erro e não mistura os 10 mil cenários com a prova de 284.",
-			"verification": "node quality/scoreboard.ts > /dev/null",
-			"state": "not_started",
-			"evidence": "",
-			"notes": "hoje soma 10049/10284 para o glm-5.3 e quebra com TypeError ao ler o .estilo.jsonl"
+			"verification": "grep -q 'O PLACAR NÃO QUEBRA NEM MISTURA' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 16): Tudo certo!",
+			"notes": "somava 10049/10284 para o glm-5.3 e quebrava com TypeError ao ler o .estilo.jsonl; auditoria do harness em 2026-11-08 (A6): o rótulo é o nome do arquivo, o .estilo.jsonl fica de fora, e o bloco O PLACAR NÃO QUEBRA NEM MISTURA confere numa pasta temporária"
 		},
 		{
 			"id": "H10",
@@ -96,7 +96,7 @@
 			"verification": "grep -q 'A PLANTA DO GRAFO' quality/tests.ts && node quality/tests.ts",
 			"state": "not_started",
 			"evidence": "",
-			"notes": "aula 14; hoje graph.html não tem o nó situacao"
+			"notes": "aula 14. O laço do especialista já está no cabeçalho de brain/graph.ts; falta o bloco A PLANTA DO GRAFO no quality/tests.ts. O brain/graph.html é gerado (DADOS=:memory: MEMORIA=:memory: node brain/graph.ts) e fica fora do git, então cada pasta tem o seu: o da pasta principal é de 02/11 e não tem o nó situacao; regere lá depois do merge"
 		},
 		{
 			"id": "H11",
@@ -114,7 +114,7 @@
 			"verification": "test -f .github/workflows/tests.yml && grep -q 'node quality/tests.ts' .github/workflows/tests.yml",
 			"state": "not_started",
 			"evidence": "",
-			"notes": "aula 12; precisa de touch .env no CI, porque o grafo lê o .env ao ser importado"
+			"notes": "aula 12. O .env virou opcional para os testes em 08/11, então o CI não precisa de touch .env nem de segredo. .github/workflows/tests.yml criado na auditoria do harness em 2026-11-08 (C9); só vira passing depois de rodar verde no GitHub, o que pede push da pessoa (o token do gh precisa do escopo workflow)"
 		},
 		{
 			"id": "H13",
@@ -123,7 +123,7 @@
 			"verification": "manual: comentário acima de instrucoesDoRedator com uma linha por regra; cada regra removida tem a nota da prova antes e depois em docs/progress.md",
 			"state": "not_started",
 			"evidence": "",
-			"notes": "aula 04"
+			"notes": "aula 04; FUTURE 3.5. Em 08/11 o custo-benefício e o ano dos fatos passaram a ser conferidos pelo código (F65, auditoria do harness, B9); falta o comentário acima de instrucoesDoRedator, uma linha por regra, e medir com a prova as redundantes antes de tirar"
 		},
 		{
 			"id": "H14",
@@ -169,6 +169,114 @@
 			"state": "passing",
 			"evidence": "2026-11-08, commit 51b6b8a com mudanças sem commit: Tudo certo!",
 			"notes": "pedido da pessoa em 2026-11-08; depende de H15. Documentos (passaporte, nascimento, vacina) continuam só com o especialista memoria, quando a pessoa conta"
+		},
+		{
+			"id": "H19",
+			"area": "harness",
+			"behavior": "As regras de não tocar e não rodar viram trava do Claude Code: .claude/settings.json nega Read e Edit de .env, data/ e logs/, e o hook PreToolUse .claude/hooks/guarda.ts pede o ok da pessoa antes de node takifly.ts start/stop/restart (também com o subcomando entre aspas) e de launchctl com com.takifly.*, da prova paga (exam.ts, style-judge.ts ou failures.ts, de qualquer pasta), de CREDITO=1 (também entre aspas) e de comando que use .env, data ou logs, com ou sem a barra; ler esses arquivos com sed, grep, cat ou git diff passa.",
+			"verification": "grep -q 'A GUARDA DO CLAUDE' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/AGENCIA.md e mais 20): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (C1); aula 08 (documento pode ser ignorado, primitiva não). Falta conferir numa sessão nova se o ask aparece no modo bypass; se não aparecer, trocar por deny com o motivo \"peça à pessoa\" Revisão independente de 08/11: passavam 'rm -rf data', 'cd quality && node exam.ts', 'CREDITO=\"1\"', 'node takifly.ts \"restart\"' e 'launchctl kickstart', e agora estão nos casos do bloco A GUARDA DO CLAUDE."
+		},
+		{
+			"id": "H20",
+			"area": "harness",
+			"behavior": "node quality/verify-feature.ts recusa sem CREDITO=1 o item com a prova paga na verification (antes de apagar results/), roda os testes antes quando a verification não cita quality/tests.ts nem init.sh, passa REJULGAR vazio e grava na evidência os arquivos sem commit e a última linha com Tudo certo! ou N de M.",
+			"verification": "grep -q 'A PORTA DO VERIFY-FEATURE' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/graph.ts, docs/conventions.md, docs/lessons-harness.md, docs/session.md e mais 8): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (C2, C4, C5); aula 08 (só o harness muda o estado para passing). Fora: exigir active e rebaixar passing que falha (apagariam registro verdadeiro)"
+		},
+		{
+			"id": "H21",
+			"area": "harness",
+			"behavior": "Em worktree do Orca (sem .env), bash init.sh avisa e segue até o fim; na pasta principal, falta de chave ainda para com exit 1. node takifly.ts start se recusa a ligar os serviços de uma pasta sem .env, antes de desligar os que estão no ar.",
+			"verification": "grep -q 'WORKTREE SEM .ENV' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 16): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (C3); aula 06 (inicializar é fase própria). Conferido à mão: bash init.sh nesta worktree chega até o fim Revisão independente de 08/11: o teste só lia o texto e passava com a condição invertida; agora o bloco WORKTREE SEM .ENV roda o init.sh de verdade num git de mentira (npm e node falsos no PATH), na pasta principal (exit 1) e num git worktree add (até o fim), e exige o ! e o process.exit(1) no start() do takifly.ts. Conferido com os dois mutantes numa cópia: cada um derruba o bloco."
+		},
+		{
+			"id": "H22",
+			"area": "harness",
+			"behavior": "O revisor independente é um subagente do projeto (.claude/agents/revisor.md) sem Edit nem Write, e o docs/session.md manda chamá-lo antes do verify-feature quando a mudança mexe em brain/ ou quality/.",
+			"verification": "grep -q 'O REVISOR SEM EDIÇÃO' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/graph.ts, docs/conventions.md, docs/lessons-harness.md, docs/session.md e mais 8): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (C8); aulas 09 e 13 (quem faz não revisa). Com Bash, o revisor ainda consegue escrever por sed ou >: essa barreira é só o prompt"
+		},
+		{
+			"id": "H23",
+			"area": "harness",
+			"behavior": "O npm test roda de graça, com ModeloFalso, o laço verificador → redator → emergência e uma conversa de duas mensagens: o preço inventado sai da memória e o bilhete \"O verificador recusou\" chega ao redator, que acerta; com 3 respostas erradas sai a lista da emergência, sem o preço inventado; e na segunda mensagem o verificador aceita os preços da busca do pedido anterior.",
+			"verification": "grep -q 'O LAÇO DO VERIFICADOR, A EMERGÊNCIA E A CONVERSA DE DUAS MENSAGENS' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 11): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (A3; a dependência do A2 ficou de fora, porque o A2 caiu na verificação); aula 10 (só o pipeline inteiro prova o sistema). Conferido com 4 mutações no brain/graph.ts (redator sem o bilhete, emergência sem a lista, resposta recusada na memória, fatos sem estado.voos): cada uma derruba o bloco. O teste do responder() fica no bloco do F69. O quality/tests.ts agora zera LANGFUSE_SECRET_KEY antes de carregar o brain/tracing.ts, para as notas de teste não chegarem ao failures.ts"
+		},
+		{
+			"id": "H24",
+			"area": "harness",
+			"behavior": "As datas da prova andam com hoje: os cenários do quality/scenarios.ts e os juízes do quality/exam.ts esperam \"12/12\" como o próximo 12/12 (proxima(mes, dia)), as mensagens que trazem o ano montam o ano a partir dela, e nenhuma data de busca, monitoramento ou hotel dos cenários fica no passado, nem hoje nem com o relógio em 20/01/2027; e nenhum cenário espera a volta antes da ida com o relógio em 20/11/2026 e 15/12/2026: quando hoje cai entre a ida e a volta, os cenários e os casos do exam.ts de ida e volta só conferem o básico (emOrdem do quality/scenarios.ts), como nos 10 mil.",
+			"verification": "grep -q 'AS DATAS DA PROVA ANDAM COM HOJE' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 16): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (A1); aula 09 (teste isolado do ambiente real). Sem isso, o monitor-ida-e-volta reprovaria um bot certo a partir de 16/11/2026 e os de 12/12 a partir de 13/12. proxima() saiu do scenarios-10k.ts para o scenarios.ts. Ficaram fixos 2028-02-29 e 2035-12-12, e a chegada \"13/12\" do catálogo. Limite: ida e volta sem ano são resolvidas cada uma sozinha, como o bot faz; entre o dia da ida e o da volta, esses cenários perdem a expectativa (monitor-ida-e-volta, rota-triangulo, rota-ida-e-volta-executiva, rota-total-depois e novo-ida-volta-mesma-companhia, e no exam.ts ida-e-volta, dias-flexiveis e dificil-volta-antes-da-ida)."
+		},
+		{
+			"id": "H25",
+			"area": "harness",
+			"behavior": "Os juízes de fatos da prova moram no quality/judges.ts, sem efeito colateral, e o npm test testa o fatosErrados com respostas reais; a rodada e o REJULGAR julgam pela mesma função, com todas as respostas (linha.respostas ?? [linha.resposta]); o REJULGAR mostra os casos que mudaram antes de gravar e não vira o veredito de uma linha gravada em outro dia (gravadaEmOutroDia, pelo horário no fim da conversa), que fica como estava e aparece como MANTIDO; e a frase de desistência do bot reprova o cenário.",
+			"verification": "grep -q 'OS JUÍZES DA PROVA' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 16): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (A4); aulas 13 (o agente não edita quem o avalia) e 14 (métrica congelada). O texto de desistência (RESPOSTA_QUE_NAO_SAIU) mora no brain/checker.ts, que o brain/graph.ts e o quality/judges.ts importam. Ficou registrado no teste que a soma errada \"Total R$ 55.520\" escapa do fatosErrados (fora da faixa e com \"total\"); quem pega é o cita do cenário Revisão independente de 08/11: o teste não conferia que o julgar chama o desistiu nem o aviso AGORA FALHA (conferido numa cópia sem cada um: o bloco cai), e um REJULGAR depois de 12/12 virava 50 vereditos certos de 08/11 em AGORA FALHA e gravava por cima."
+		},
+		{
+			"id": "H26",
+			"area": "harness",
+			"behavior": "Cada linha da prova grava o commit (com -sujo quando há mudança sem commit), todas as respostas e o caminho de cada mensagem (feitos, replanos e tentativas, lidos do estado do grafo depois de cada mensagem).",
+			"verification": "grep -q 'A PROVA GRAVA O COMMIT E O CAMINHO' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 16): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (A5); aula 11 (observabilidade dentro do harness). Só no quality/exam.ts: o brain/tracing.ts ficou como estava, porque roda no bot e no vigia. Os tokens ficaram para depois. Caso aprovado com tentativas > 0 é caso que o verificador salvou (estimativa do H14)"
+		},
+		{
+			"id": "H27",
+			"area": "harness",
+			"behavior": "REFAZER=falhas node quality/exam.ts roda de novo só os casos cuja última linha reprovou, no mesmo arquivo; erro de rede sempre roda de novo, e o scoreboard usa a última linha de cada caso.",
+			"verification": "grep -q 'REFAZER SÓ AS FALHAS' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 16): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (A6); aula 14 (métrica congelada). A regra de quem pular está no casosTerminados do quality/judges.ts. Rodar com REFAZER gasta crédito; o teste não roda a prova"
+		},
+		{
+			"id": "H28",
+			"area": "harness",
+			"behavior": "Um hook Stop (.claude/hooks/pronto.ts) roda node quality/tests.ts quando há .ts ou .json mudado e não deixa o Claude parar sem Tudo certo!.",
+			"verification": "grep -q '\"Stop\"' .claude/settings.json && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "auditoria do harness em 2026-11-08 (C5); ficou para depois: o verify-feature já roda os testes (H20). Obrigações: timeout explícito no hook, sair com 0 quando stop_hook_active, cache pelo hash do git diff. Risco: outra sessão editando a pasta faz o hook bloquear por erro alheio; FUTURE 9.1"
+		},
+		{
+			"id": "H29",
+			"area": "harness",
+			"behavior": "Nenhum item que não está passing tem uma verification que é só um grep -q: o H14 ganha um bloco no quality/tests.ts que roda o grafo com ModeloFalso e SEM_VERIFICADOR=1 e confere que o noVerificar não roda; H07 vira manual: (mexe no restart, só com a pessoa); F25 vira grep com node --check bot.ts, ou manual:; F51 e F61 viram manual:, porque são fatos do passado.",
+			"verification": "grep -q 'VERIFICAÇÃO NÃO É SÓ GREP' quality/tests.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "auditoria do harness em 2026-11-08 (C7); aula 08 (verificação frouxa x estrita); FUTURE 9.2. takifly.ts e bot.ts não são importados por nenhum teste, então H07 e F25 não cabem num bloco do tests.ts. F62 fica como está. Até hoje nenhum item virou passing por grep frouxo: H06 é o único passing só com grep, e está implementado"
+		},
+		{
+			"id": "H30",
+			"area": "harness",
+			"behavior": "Cada linha da prova grava os tokens de entrada e de saída de cada mensagem, somados por um handleLLMEnd a partir do usage que a Ollama devolve, para ver o custo de cada pedido sem abrir o Langfuse.",
+			"verification": "grep -q 'OS TOKENS DE CADA PEDIDO' quality/tests.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "auditoria do harness em 2026-11-08 (A5, o segundo passo); aula 11; FUTURE 7.6. Só no quality/exam.ts, como o H26: o brain/tracing.ts roda no bot e no vigia. Antes, conferir se a Ollama Cloud devolve o usage"
 		},
 		{
 			"id": "F01",
@@ -240,7 +348,7 @@
 			"verification": "grep -q 'read_travel_guide' brain/tools.ts && node quality/exam.ts guia",
 			"state": "not_started",
 			"evidence": "",
-			"notes": "FUTURE 2.2 e 2.3; depende de F27"
+			"notes": "FUTURE 2.2 e 2.3; depende de F34 (o sources/guide.ts do FUTURE 2.1)"
 		},
 		{
 			"id": "F09",
@@ -474,7 +582,7 @@
 			"verification": "node quality/exam.ts lugar",
 			"state": "passing",
 			"evidence": "registrado na criação da lista (2026-11-04), antes do commit: tests.ts (os blocos AEROPORTOS e ESCRITA ERRADA); 10k digitacao 245/250; commit ecda5f3",
-			"notes": "rules/airports.ts"
+			"notes": "rules/airports.ts. Auditoria do harness em 2026-11-08 (B2): o cenário lugar-sao-jose falhava por causa do código (\"sao jose\" ia direto para SJC, sem perguntar), e não do modelo; o conserto é o F68, ainda sem prova"
 		},
 		{
 			"id": "F41",
@@ -565,6 +673,69 @@
 			"state": "not_started",
 			"evidence": "",
 			"notes": "FUTURE 6.2; custa uma dependência nova"
+		},
+		{
+			"id": "F64",
+			"area": "brain",
+			"behavior": "O verificador recusa preço dado à companhia errada: numa linha da resposta com uma companhia só e um valor só, se o valor é preço de um voo, o par preço e companhia tem de existir nos fatos (\"Air Europa por R$ 3250\" com 3250 da Azul é recusado). Linha com total, soma, média, diferença, ida e volta ou por pessoa fica de fora.",
+			"verification": "grep -q 'O PREÇO É DAQUELA COMPANHIA' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 11): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (B1); aula 09. brain/checker.ts, exceções copiadas do fatosErrados do quality/exam.ts. Que a prova melhora (fala-enrolada, seguimento-mais-rapido), só ela mede, com crédito"
+		},
+		{
+			"id": "F65",
+			"area": "brain",
+			"behavior": "O custo-benefício e os números sem R$ dos fatos, como o ano da data, não viram preço aceito: \"custa R$ 3.988\" com o custo-benefício 3988 e \"R$ 2.026\" são recusados. Mas a linha que diz que o número é o custo-benefício (custo, bénéfice, value, qualité, calidad, Leistung, Nutzen, Wert, índice) pode citá-lo: \"O custo-benefício da TAP é de R$ 3710\" passa, porque o cenário conta-hora-por-reais pede esse número. O Resultado: do calcular continua valendo, também sem o sinal de menos.",
+			"verification": "grep -q 'CUSTO-BENEFÍCIO E ANO NÃO SÃO PREÇO' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 16): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (B9, só a parte 1); brain/checker.ts, saiu o numerosGrandes(fatos). O recadoConferido (brain/graph.ts) também passa a descartar a nota do especialista que citar o custo-benefício como preço. A parte da classe e o comentário do H13 ficaram de fora Revisão independente de 08/11: o verificador recusava o custo-benefício até na linha que dizia que era ele; com o conserto, as respostas aprovadas que só o verificador novo recusava caíram de 1 para 0 (results/ desta pasta), de 23 para 0 (glm-5.3.jsonl da pasta principal) e de 871 para 1 (glm-5.3-10k.jsonl). O brain/agents.ts:154 (não escreva o número do custo-benefício ao listar voos) ficou como estava."
+		},
+		{
+			"id": "F66",
+			"area": "brain",
+			"behavior": "O calcular recusa multiplicar um preço (100 ou mais) pelo número de passageiros de uma busca deste pedido (busca de 2 adultos, × 2), porque o preço do voo já é o total deles; busca de 1 adulto × 4 (conta-quatro-pessoas) continua valendo. A descrição da ferramenta diz para não multiplicar pelo número de pessoas da busca.",
+			"verification": "grep -q 'O CALCULAR NÃO MULTIPLICA PASSAGEIROS' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/AGENCIA.md e mais 20): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (B3); brain/tools.ts. Em 08/11 a primeira versão recusava qualquer preço × 2 a 9 e quebraria o conta-quatro-pessoas; estreitada no mesmo dia. Limites: só vê as buscas do pedido atual (o noPreparar zera), e uma soma que conte a mesma passagem duas vezes ([27760, 27760]) continua passando. A descrição nova é prompt: o efeito na resposta só a prova mede, com crédito"
+		},
+		{
+			"id": "F67",
+			"area": "brain",
+			"behavior": "Passar do limite de 12 buscas por pedido vira \"não pesquisei ...: passou do limite de 12 buscas por pedido\", e não \"A BUSCA FALHOU\", para a resposta não pedir para tentar de novo o que bateria no mesmo limite.",
+			"verification": "grep -q 'doesNotMatch(saida, /A BUSCA FALHOU/)' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 11): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (B7); brain/tools.ts, no catch do pesquisarVarios. Com o texto novo, o verificador recusa uma resposta que diga que a pesquisa falhou"
+		},
+		{
+			"id": "F68",
+			"area": "rules",
+			"behavior": "\"São José\" sozinho não pesquisa: o bot pergunta se é São José dos Campos (SJK), São José do Rio Preto (SJP), San Jose nos EUA (SJC) ou San José na Costa Rica (SJO). \"São José dos Campos\" continua indo direto para SJK.",
+			"verification": "grep -q 'resolverAeroportos(\"São José\")' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 11): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (B2); tabela PERGUNTAR em rules/airports.ts, porque rules/airports-data.ts é gerado. Falta a prova do cenário lugar-sao-jose (node quality/exam.ts lugar-sao-jose), que gasta crédito"
+		},
+		{
+			"id": "F69",
+			"area": "brain",
+			"behavior": "Um pedido que quebrou não prende o canal: se a retomada do pedido que caiu no meio quebra de novo, o responder() registra no console, anota retomada_falhou no Langfuse, avisa a pessoa (\"Não consegui terminar o pedido anterior; se ainda precisar dele, mande de novo.\") e segue com a mensagem nova, que descarta o pedido antigo, em vez de devolver o mesmo aviso de erro a cada mensagem.",
+			"verification": "grep -q 'O PEDIDO QUE QUEBROU NÃO PRENDE O CANAL' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-08, commit 6928ba1 com mudanças sem commit (AGENTS.md, brain/checker.ts, brain/graph.ts, brain/tools.ts, docs/conventions.md e mais 16): Tudo certo!",
+			"notes": "auditoria do harness em 2026-11-08 (B6, só o passo 1; A3, o teste do responder()); try/catch na retomada do responder() em brain/graph.ts. A resposta do pedido antigo não sai, mas os voos dele continuam no estado. No Slack, só vale depois que a pessoa reiniciar o bot. O passo 2 é o F70"
+		},
+		{
+			"id": "F70",
+			"area": "brain",
+			"behavior": "Nenhum pedido fica preso por minutos: o criarModelo (brain/graph.ts) usa maxRetries: 2, e hoje o LangChain repete até 6 vezes com timeout de 120 s cada; o grafo.stream do rodar() tem signal: AbortSignal.timeout(180_000); e o fetch da planilha (sources/spreadsheet.ts) tem signal: AbortSignal.timeout(30_000), como o de sources/flights.ts. O explicarErro já traduz \"aborted\".",
+			"verification": "grep -q 'maxRetries' brain/graph.ts && grep -q 'AbortSignal.timeout' sources/spreadsheet.ts && node quality/tests.ts",
+			"state": "not_started",
+			"evidence": "",
+			"notes": "auditoria do harness em 2026-11-08 (B6, passo 2); medir os tempos reais antes (a duração dos pedidos e das chamadas mais longas, no Langfuse), para o prazo não cortar um pedido que hoje termina. O fetch do Node já desiste sozinho em 300 s (headersTimeout e bodyTimeout); FUTURE 5.4"
 		}
 	]
 }
