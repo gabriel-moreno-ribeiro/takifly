@@ -93,11 +93,14 @@ export function comLinha(texto: string, blocos: unknown[] = emSecoes(texto)): Me
 //   refazer: o lote muda ou completa o pedido. O pedido é cancelado de verdade (AbortSignal até o grafo.stream, e o
 //     responder desfaz ele no checkpointer) e um novo começa com as mensagens dele e as do lote;
 //   fila: outro assunto. O pedido termina e o lote vem depois, com o "Peguei";
-//   ignorar_espera: "ok", "valeu". Nada muda.
+//   ignorar_espera: "ok", "valeu". Nada muda;
+//   cancelar: "para", "stop", "esquece". O pedido rodando é cancelado e os que esperam na fila saem, sem pedido novo.
 // Juiz que quebra ou demora vale fila: é o que o bot fazia antes, e nunca perde mensagem.
 export const ESPERA_POR_MAIS = 2_000;    // quanto silêncio fecha um lote de mensagens (era 5 s até 09/11: a pessoa achou lento)
 export const PRAZO_DO_JUIZ = 8_000;      // depois disso, sem decisão do juiz, vale fila
 export const REFAZENDO = ":taki: Vi que você mudou o pedido. Refaço com a mensagem nova junto.";
+export const PAREI = ":taki: Parei o pedido. Quando quiser, é só mandar de novo.";
+export const NADA_PARA_PARAR = ":taki: Não tinha nada rodando para parar: o pedido já tinha terminado.";
 
 // fase: na fila, rodando (dá para cancelar), respondendo (a resposta já saiu do grafo: tarde para refazer) ou feito
 type Pedido = { tipo: "pedido"; textos: string[]; controle: AbortController; fase: "fila" | "rodando" | "respondendo" | "feito" };
@@ -250,6 +253,14 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 		anotarNoPainel(canal, "juiz", `${decisao}: ${motivo}`);
 		anotar(canal, "juiz_das_mensagens", certo, `${decisao}: ${motivo}`);
 		if (decisao === "ignorar_espera") return;
+		// cancelar: até 09/11 o "stop" virava refazer, e o bot começava um pedido novo com o texto "stop" junto
+		if (decisao === "cancelar") {
+			const naFila = estado.fila.filter((tarefa): tarefa is Pedido => tarefa.tipo === "pedido");
+			estado.fila = estado.fila.filter((tarefa) => tarefa.tipo !== "pedido");
+			const agora = estado.atual && estado.atual.fase === "rodando" && !estado.atual.controle.signal.aborted ? estado.atual : null;
+			if (agora) cancelar(canal, "a pessoa pediu para parar");
+			return void (await dizer(canal, agora || naFila.length > 0 ? PAREI : NADA_PARA_PARAR));
+		}
 		// o juiz leva segundos, e nesse tempo o alvo pode ter mudado de fase. Olha onde ele está AGORA:
 		//   cancelado por outro motivo (um "excluir contexto"): as mensagens dele não voltam, o lote vai sozinho;
 		//   respondendo ou feito: tarde para refazer, a resposta já saiu. O lote vai para a fila;

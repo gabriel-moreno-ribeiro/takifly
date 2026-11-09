@@ -1965,7 +1965,7 @@ painelDoContexto.closeAllConnections();
 painelDoContexto.close();
 
 // ---------- VÁRIAS MENSAGENS SEGUIDAS ----------
-const { ESPERA_POR_MAIS, PEGUEI, PRAZO_DO_JUIZ, REFAZENDO } = await import("../brain/channel.ts");
+const { ESPERA_POR_MAIS, PAREI, PEGUEI, PRAZO_DO_JUIZ, REFAZENDO } = await import("../brain/channel.ts");
 // um relógio de mentira: o teste anda com o tempo na mão, sem esperar de verdade
 function relogioFalso() {
 	let agora = 0;
@@ -2097,6 +2097,23 @@ assert.equal(naMao.pedidos.length, pedidosAntes);
 assert.equal(naMao.pedidos.at(-1)!.cancelado, false);
 naMao.pedidos.at(-1)!.responder("Voos para Salvador.");
 await canais.vazio("falso-refazer");
+
+// cancelar (09/11): o "stop" virava refazer, e o bot começava um pedido novo com o texto "stop". Agora o pedido
+// rodando é cancelado, o que esperava na fila sai, e nenhum pedido novo começa
+Object.assign(modelos, { especialista: new ModeloFalso([decide("fila", "outro assunto"), decide("cancelar", "mandou parar")]) });
+await canais.receber("falso-cancelar", "voos de GRU para SSA em 14/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-cancelar", "e hotel em Salvador?");
+await cronometro.avancar(ESPERA_POR_MAIS);
+const pedidosAntesDoStop = naMao.pedidos.length;
+await canais.receber("falso-cancelar", "stop");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.equal(naMao.pedidos.at(-1)!.cancelado, true);
+naMao.pedidos.at(-1)!.responder("resposta velha");
+await canais.vazio("falso-cancelar");
+assert.equal(naMao.pedidos.length, pedidosAntesDoStop);    // nem o "stop" nem o hotel da fila viraram pedido
+assert.deepEqual(textosDe("falso-cancelar").filter((texto) => !texto.includes("farejando")), [PEGUEI, PAREI]);
+assert.ok(avisosDoPainel.some((aviso) => aviso.conversa === "falso-cancelar" && aviso.detalhe === "pedido cancelado: a pessoa pediu para parar"));
 
 // o juiz que quebra cai em fila: nada é cancelado e nenhuma mensagem se perde
 Object.assign(modelos, { especialista: new ModeloFalso([new Error("a Ollama recusou")]) });
