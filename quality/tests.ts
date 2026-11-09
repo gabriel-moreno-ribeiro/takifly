@@ -1966,7 +1966,7 @@ painelDoContexto.close();
 
 // ---------- VÁRIAS MENSAGENS SEGUIDAS ----------
 const { ESPERA_POR_MAIS, PEGUEI, PRAZO_DO_JUIZ, REFAZENDO } = await import("../brain/channel.ts");
-// um relógio de mentira: o teste anda com o tempo na mão, sem esperar 5 s de verdade
+// um relógio de mentira: o teste anda com o tempo na mão, sem esperar de verdade
 function relogioFalso() {
 	let agora = 0;
 	const marcados: { quando: number; fazer: () => void }[] = [];
@@ -2035,11 +2035,11 @@ naMao.pedidos[0].responder("Achei voos.");
 await canais.vazio("falso-seguidas");
 assert.deepEqual(textosDe("falso-seguidas"), [":taki: O Taki está farejando...", "Achei voos."]);
 
-// a mensagem a 4,9 s zera o cronômetro: o pedido só sai 5 s depois dela
+// a mensagem que chega 100 ms antes do fim zera o cronômetro: o pedido só sai ESPERA_POR_MAIS depois dela
 await canais.receber("falso-zera", "voos para Roma");
-await cronometro.avancar(4900);
+await cronometro.avancar(ESPERA_POR_MAIS - 100);
 await canais.receber("falso-zera", "em 20/12");
-await cronometro.avancar(4900);
+await cronometro.avancar(ESPERA_POR_MAIS - 100);
 assert.equal(naMao.pedidos.filter((pedido) => pedido.texto.includes("Roma")).length, 0);
 await cronometro.avancar(100);
 assert.deepEqual(naMao.pedidos.at(-1)!.texto, "voos para Roma\nem 20/12");
