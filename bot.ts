@@ -10,7 +10,7 @@ import { App } from "@slack/bolt";
 
 // puxa do NOSSO arquivo brain/channel.ts (o "./" quer dizer "aqui nesta mesma pasta") o que o bot faz com cada
 // mensagem: a fila de cada canal e os comandos de contexto. Aqui fica só a ligação com o Slack
-import { criarCanais } from "./brain/channel.ts";
+import { comLinha, criarCanais } from "./brain/channel.ts";
 import { ligarPainel } from "./brain/live.ts";
 
 // ---------- CHAVES ----------
@@ -52,7 +52,7 @@ app.message(async ({ message, say }) => {
 	if (!texto) {
 		// só o arquivo, sem texto: o modelo não lê arquivo, então o bot diz isso em vez de ficar calado
 		const tipo = message.subtype === "file_share" ? message.files?.[0]?.mimetype ?? "" : "";
-		await say(tipo.startsWith("audio") ? "Ainda não consigo ouvir áudio. Me escreve o pedido que eu procuro." : "Ainda não consigo ler foto nem arquivo. Me escreve de onde você sai, para onde vai e quando, que eu procuro.");
+		await say(comLinha(tipo.startsWith("audio") ? "Ainda não consigo ouvir áudio. Me escreve o pedido que eu procuro." : "Ainda não consigo ler foto nem arquivo. Me escreve de onde você sai, para onde vai e quando, que eu procuro.") as any);
 		return;
 	}
 	console.log("Chegou uma mensagem: " + texto);
