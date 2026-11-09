@@ -376,7 +376,7 @@ function recadoConferido(nome: string, recado: string, estado: typeof Estado.Sta
 // ---------- A TAREFA CUMPRIDA ----------
 // dizer "pronto" não basta: o código confere se, neste pedido, uma ferramenta da tarefa do especialista
 // respondeu sem erro. Listar aeroportos ou ver o dia da semana ajuda, mas não é pesquisar.
-const FERRAMENTAS_DA_TAREFA: Partial<Record<NomeDoAgente, string[]>> = { pesquisador: ["buscar_voos", "buscar_hoteis"] };
+const FERRAMENTAS_DA_TAREFA: Partial<Record<NomeDoAgente, string[]>> = { pesquisador: ["buscar_voos", "buscar_mais_barato", "buscar_hoteis"] };
 
 // as respostas que as ferramentas da tarefa deste especialista deram neste pedido
 function respostasDaTarefa(nome: NomeDoAgente, mensagens: BaseMessage[]) {
@@ -842,6 +842,7 @@ const paraPessoa = (data: unknown) => (typeof data === "string" && /^\d{4}-\d{2}
 export function descreverChamada(chamada: { name: string; args: Record<string, any> }) {
 	const { origem, destino, data, ate, cidade } = chamada.args;
 	if (chamada.name === "buscar_voos") return `:mag: Procurando voos de ${origem} para ${destino} ${ate ? `de ${paraPessoa(data)} a ${paraPessoa(ate)}` : `em ${paraPessoa(data)}`}...`;
+	if (chamada.name === "buscar_mais_barato") return `:calendar: Olhando o calendário de preços de ${origem} para ${destino}${chamada.args.de ? ` em ${paraPessoa(chamada.args.de)}${chamada.args.ate ? ` até ${paraPessoa(chamada.args.ate)}` : ""}` : " nos próximos meses"}...`;
 	if (chamada.name === "buscar_hoteis") return `:hotel: Procurando hotel em ${cidade}...`;
 	if (chamada.name === "criar_monitoramento") return `:eyes: Ligando o monitoramento de preço de ${origem} para ${destino}...`;
 	if (chamada.name.includes("monitoramento")) return ":eyes: Olhando seus monitoramentos...";

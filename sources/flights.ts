@@ -4,6 +4,7 @@
 // lerPagina dá um erro claro em vez de fingir que não há voos.
 //
 // Para testar sozinho (dentro da pasta passagens.ts/):   node sources/flights.ts GRU LIS 2026-12-12
+// O calendário de preços de um período:                  node sources/flights.ts calendario SSA FRA 2026-12-01 2027-01-31
 
 // o formato de cada voo
 export type Voo = {
@@ -194,9 +195,60 @@ export async function buscarVoos(origem: string, destino: string, data: string, 
 	return lerPagina(await resposta.text(), origem, destino, data, link);
 }
 
+// ---------- O CALENDÁRIO DE PREÇOS ----------
+// O Google Voos mostra num calendário o preço do voo mais barato de cada dia. O pedido que a página faz para
+// desenhar esse calendário (GetCalendarGraph) devolve até uns 4 meses numa chamada só, enquanto a busca normal
+// é um dia por chamada. Não tem documentação: o formato foi copiado de github.com/krisukox/google-flights-api
+// e conferido em 09/11/2026 (SSA→FRA, dezembro e janeiro, só ida). O preço é o que o Google guardou de buscas
+// anteriores, então é aproximado (R$ 1957 no calendário, R$ 2002 na busca de verdade do mesmo dia): serve para
+// achar o dia, e o preço que vai para a resposta sai da busca de verdade daquele dia.
+export type DiaDoCalendario = { data: string; preco: number };
+
+export function montarPedidoDoCalendario(origem: string, destino: string, de: string, ate: string, adultos: number, criancas: number, classe: string) {
+	const lugar = (iata: string) => `[\\"${iata}\\",0]`;    // 0 é aeroporto (5 seria cidade, com o código do Google)
+	// 2 é só ida; depois vêm a classe, os passageiros [adultos, crianças, bebê no colo, bebê no assento] e o trecho
+	const trecho = `[[[${lugar(origem)}]],[[${lugar(destino)}]],null,0,[],[],\\"${de}\\",null,[],[],[],null,null,[],3]`;
+	const busca = `[null,null,2,null,[],${CLASSES[classe]},[${adultos},${criancas},0,0],null,null,null,null,null,null,[${trecho}],null,null,null,1,null,null,null,null,null,[]]`;
+	return `[null,"[null,${busca},[\\"${de}\\",\\"${ate}\\"],null,null]"]`;
+}
+
+// a resposta vem em pedaços, um por linha, depois de uma linha de proteção ")]}'". O pedaço com dados começa
+// com [["wrb.fr", e o terceiro campo dele é outro JSON, em texto, com a lista [data, volta, [[null, preço], ...], 1]
+export function lerCalendario(texto: string): DiaDoCalendario[] {
+	const pedacos = texto.split("\n").filter((linha) => linha.startsWith('[["wrb.fr"')).map((linha) => JSON.parse(linha)[0]?.[2]).filter(Boolean);
+	if (pedacos.length === 0) throw new Error("o Google não devolveu o calendário (o formato pode ter mudado)");
+	return pedacos.flatMap((pedaco) => JSON.parse(pedaco)[1] ?? [])
+		.map((dia: any) => ({ data: dia?.[0], preco: dia?.[2]?.[0]?.[1] }))
+		.filter((dia: DiaDoCalendario) => /^\d{4}-\d{2}-\d{2}$/.test(dia.data) && Number.isFinite(dia.preco) && dia.preco > 0);
+}
+
+// sinal: o pedido cancelado (brain/channel.ts) corta também a chamada que já saiu
+export async function buscarCalendario(origem: string, destino: string, de: string, ate: string, adultos = 1, criancas = 0, classe = "economica", sinal?: AbortSignal): Promise<DiaDoCalendario[]> {
+	conferirPedido(origem, destino, de, adultos, criancas, classe);
+	conferirPedido(origem, destino, ate, adultos, criancas, classe);
+	const resposta = await fetch("https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/GetCalendarGraph?hl=pt-BR&gl=BR&curr=BRL&rt=c", {
+		method: "POST",
+		headers: {
+			"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+			"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+			// idioma, país e moeda: sem isto o Google escolhe a moeda pelo endereço de quem pergunta
+			"X-Goog-Ext-259736195-Jspb": '["pt-BR","BR","BRL",1,null,[180],null,[],1,[]]',
+		},
+		body: "f.req=" + encodeURIComponent(montarPedidoDoCalendario(origem, destino, de, ate, adultos, criancas, classe)),
+		signal: sinal ? AbortSignal.any([sinal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
+	});
+	if (!resposta.ok) throw new Error("o Google respondeu com erro " + resposta.status);
+	return lerCalendario(await resposta.text());
+}
+
 // ---------- TESTE PELO TERMINAL ----------
-// só roda com "node sources/flights.ts ...", não quando outro arquivo importa este
-if (import.meta.main) {
+// só roda com "node sources/flights.ts ...", não quando outro arquivo importa este.
+// O calendário: node sources/flights.ts calendario SSA FRA 2026-12-01 2027-01-31
+if (import.meta.main && process.argv[2] === "calendario") {
+	const [, origem, destino, de, ate] = process.argv.slice(2);
+	const dias = await buscarCalendario(origem, destino, de, ate);
+	console.log(`${dias.length} dias. Os mais baratos: ` + dias.toSorted((a, b) => a.preco - b.preco).slice(0, 5).map((dia) => `${dia.data} R$ ${dia.preco}`).join(" | "));
+} else if (import.meta.main) {
 	const [origem, destino, data, adultos, criancas, classe] = process.argv.slice(2);
 	const voos = await buscarVoos(origem, destino, data, Number(adultos ?? 1), Number(criancas ?? 0), classe);
 	console.log(voos.length + " voos. Os mais baratos:");

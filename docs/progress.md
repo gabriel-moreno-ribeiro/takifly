@@ -8,6 +8,12 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-11-04T20:47:43Z }
 stale_after: 2026-11-11T00:00:00Z
 ---
 
+# 09/11: o mais barato num período ou num país (F74), linha no fim de cada mensagem e resumo sem frase cortada
+
+- **F74 (`passing`)**: "voo de Salvador para a Alemanha em dezembro ou janeiro, o que estiver mais barato" travava no Slack (país não é cidade, mês não é dia, e o bot recusou a semana que ele mesmo propôs). A ferramenta `buscar_mais_barato` (`brain/tools.ts`) lê o calendário de preços do Google (`buscarCalendario` em `sources/flights.ts`, uma chamada por rota cobre até uns 4 meses) e confere os dois dias mais baratos na busca de verdade. Com o Google de verdade, a Alemanha (22 aeroportos) leva uns 2 a 2,5 min. Prova de 09/11: 10 de 10 nos cenários `calendario-*` e nos vizinhos de data; os 12 `monitor-*` passaram. O revisor achou 10 problemas (o grave: o verificador não reconhecia a falha do calendário); todos consertados, com teste.
+- **No ar antes, no mesmo dia**: linha (`divider`) no fim de cada mensagem do bot e o resumo que para na última frase inteira (PR #9).
+- **Próximo passo**: ver no Slack um pedido de verdade do F74. Se 2 min for demais para país grande, fazer os calendários em paralelo (com cuidado com o 429 do Google).
+
 # Madrugada 08→09/11
 
 Trabalhei sozinho, a pedido da pessoa, na branch `gabriel-moreno-ribeiro/madrugada-memoria-planilha` (worktree do Orca, sem `.env`). Os três itens ficaram `passing`, cada um com `npm test` em "Tudo certo!", revisor independente (todos os problemas médios e altos consertados, com teste) e `node quality/verify-feature.ts`. Nada disso está no Slack ainda: falta push, PR, merge e restart (veja "O que você precisa fazer"). Não gastei crédito: nenhum modelo de verdade, nenhum Langfuse, nenhuma prova.

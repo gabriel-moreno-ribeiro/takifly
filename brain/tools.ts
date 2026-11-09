@@ -7,18 +7,18 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
 import { hojeEmSaoPaulo, somarDias } from "../rules/dates.ts";
-import { descreverAeroporto, nomesDoAeroporto, resolverAeroportos, semAcento } from "../rules/airports.ts";
+import { aeroportosDoPais, cidadeDoAeroporto, descreverAeroporto, nomeDaCidade, nomesDoAeroporto, resolverAeroportos, semAcento } from "../rules/airports.ts";
 import { apagarPreferencia, cancelarMonitoramento, criarMonitoramento, type Dossie, guardarDossie, guardarPreferencia, listarMonitoramentos, listarPreferencias, type Monitoramento } from "../storage/database.ts";
 import { buscarHospedagem, conferirPedido as conferirPedidoDeHospedagem, resumirHospedagens } from "../sources/hotels.ts";
 import { atualizarPlanilha, horas } from "../sources/spreadsheet.ts";
-import { buscarVoos, precoEquivalente, type Voo } from "../sources/flights.ts";
+import { buscarCalendario, buscarVoos, type DiaDoCalendario, precoEquivalente, type Voo } from "../sources/flights.ts";
 import { pesquisarNaWeb, resumirAchados } from "../sources/web.ts";
 import { descreverClima, verClima } from "../sources/weather.ts";
 import { regrasDeEntrada } from "../rules/rules.ts";
 
 // ---------- SERVIÇOS DE FORA ----------
 // o que sai do Mac fica neste objeto para a prova (exam.ts) poder trocar por versões de mentira
-export const servicos = { buscarVoos, buscarHospedagem, atualizarPlanilha, pesquisarNaWeb, verClima, esperar: (ms: number) => new Promise((pronto) => setTimeout(pronto, ms)) };
+export const servicos = { buscarVoos, buscarCalendario, buscarHospedagem, atualizarPlanilha, pesquisarNaWeb, verClima, esperar: (ms: number) => new Promise((pronto) => setTimeout(pronto, ms)) };
 
 // ---------- O AVISO DE PROGRESSO DA BUSCA ----------
 // o responder (graph.ts) guarda aqui, por conversa, a função que edita o aviso no Slack; a busca grande usa para a barra.
@@ -166,6 +166,110 @@ export function dataFoiDita(data: string, textos: string[]) {
 	});
 }
 
+// ---------- PERÍODOS ----------
+// "dezembro", "janeiro de 2027", "dezembro ou janeiro": o mês inteiro, do dia 1 ao último. Mês que já começou vale de
+// hoje até o fim dele; mês que já acabou é o do ano que vem. "12/12" continua um dia só, pelo entenderData.
+const MAX_DIAS_DO_PERIODO = 180;    // o calendário do Google devolveu 4 meses numa chamada; 6 meses é o teto
+const DIAS_SEM_PERIODO = 90;        // "quando estiver mais barato", sem mês: os próximos 3 meses
+// sem período, só quando a pessoa quer o mais barato E disse que a data não importa. Sem "barato", "qualquer dia
+// serve" continua virando pergunta (cenário data-qualquer-dia): ela não pediu o mais barato
+const MAIS_BARATO = /barat|em conta/;
+const DATA_NAO_IMPORTA = /qualquer (data|dia|epoca|mes|momento)|tanto faz|datas? flexive|quando (estiver|for|tiver|ficar|sair)|(data|dia|epoca|mes|periodo) mais (barat|em conta)/;
+// pedaço de mês não é o mês inteiro: "primeira semana de dezembro" pesquisaria dezembro todo
+const PEDACO_DE_MES = /\b(primeira|segunda|terceira|quarta|ultima) (semana|quinzena)|\b(inicio|comeco|meio|metade|fim|final) d[eo]\b/;
+// dias soltos ("10/12, 15/12 e 18/12", "10/12 ou 15/12", "10, 15 e 18 de dezembro"): o calendário de 10 a 18 conferiria
+// dias que ninguém pediu (prova de 09/11). Esses vão para o buscar_voos, um por dia
+const DIAS_SOLTOS = [/(\b\d{1,2}\/\d{1,2}\b[^/]*){3}/, /\b\d{1,2}\/\d{1,2}\s+ou\s+\d{1,2}\/\d{1,2}\b/, /\b\d{1,2}\s*,\s*\d{1,2}\s+(e|ou)\s+\d{1,2}\b/, /\b\d{1,2}\s+ou\s+\d{1,2}\s+de\s+[a-z]+/];
+
+// os meses citados no texto, na ordem em que aparecem
+function mesesDoTexto(limpo: string) {
+	return MESES.flatMap((nomes, indice) => [...limpo.matchAll(new RegExp(`\\b(?:${nomes.join("|")})\\b(?:\\s+(?:de\\s+)?(\\d{4}))?`, "g"))]
+		.map((achado) => ({ mes: indice + 1, ano: achado[1] ? Number(achado[1]) : null, posicao: achado.index })))
+		.toSorted((a, b) => a.posicao - b.posicao);
+}
+
+// "dezembro" e "dezembro de 2027" são meses; "12 de dezembro" é um dia (tem número fora do ano)
+const ehMes = (limpo: string) => mesesDoTexto(limpo).length > 0 && !/\d/.test(limpo.replace(/\b\d{4}\b/g, ""));
+const ultimoDiaDoMes = (ano: number, mes: number) => new Date(Date.UTC(ano, mes, 0)).toJSON().slice(0, 10);
+
+// o primeiro e o último dia de um texto: uma data é ela mesma; um ou mais meses vão do primeiro ao último.
+// Cada mês sem ano é o primeiro que ainda não acabou em aPartirDe, e depois vão em ordem: "janeiro ou dezembro",
+// dito em novembro, é dezembro de 2026 a janeiro de 2027
+function limitesDoTexto(texto: string, hoje: string, aPartirDe = hoje) {
+	const limpo = semAcento(texto);
+	if (!ehMes(limpo)) {
+		const data = entenderData(texto, hoje);
+		return [data, data];
+	}
+	// "sexta de dezembro" virava a próxima sexta, em novembro
+	if (DIAS_DA_SEMANA.some((nome) => limpo.includes(nome))) throw new Error(`"${texto}" não é um período: pergunte os dias.`);
+	const limites = mesesDoTexto(limpo).map(({ mes, ano }) => {
+		const anoCerto = ano ?? Number(aPartirDe.slice(0, 4)) + (ultimoDiaDoMes(Number(aPartirDe.slice(0, 4)), mes) < aPartirDe ? 1 : 0);
+		const fim = ultimoDiaDoMes(anoCerto, mes);
+		if (fim < hoje) throw new Error(`${texto} já passou. Avise e pergunte qual é o período certo, no futuro.`);
+		return [montarData(anoCerto, mes, 1), fim];
+	}).toSorted((a, b) => a[0].localeCompare(b[0]));
+	return [limites[0][0] < hoje ? hoje : limites[0][0], limites.at(-1)![1]];
+}
+
+export function entenderPeriodo(de: string, ate?: string, hoje = hojeEmSaoPaulo()) {
+	const [inicio, fimDoComeco] = limitesDoTexto(de, hoje);
+	const fim = ate ? limitesDoTexto(ate, hoje, inicio)[1] : fimDoComeco;
+	if (fim < inicio) throw new Error(`o fim do período (${fim}) é antes do começo (${inicio}). Avise e pergunte as datas certas.`);
+	const dias = (Date.parse(fim) - Date.parse(inicio)) / 86_400_000 + 1;
+	if (dias > MAX_DIAS_DO_PERIODO) throw new Error(`o período de ${inicio} a ${fim} tem ${dias} dias, e o limite é ${MAX_DIAS_DO_PERIODO}. Pergunte quais meses a pessoa prefere.`);
+	return [inicio, fim];
+}
+
+// os meses pedidos, quando o período é só de meses: "dezembro ou fevereiro" pesquisa de dezembro a fevereiro numa
+// chamada só, e janeiro sai depois. Com um dia numa das pontas, vale o intervalo inteiro
+export function mesesPedidos(de: string, ate?: string) {
+	const textos = [de, ate].filter((texto): texto is string => Boolean(texto)).map(semAcento);
+	return textos.every(ehMes) ? new Set(textos.flatMap((texto) => mesesDoTexto(texto).map(({ mes }) => mes))) : null;
+}
+
+// o dia com o mês, do jeito que a pessoa escreve: "10/12", "10.12", "10 de dezembro"
+function diaEMesDitos(data: string, textos: string[]) {
+	const dia = Number(data.slice(8, 10));
+	const mes = Number(data.slice(5, 7));
+	const jeitos = new RegExp(`(^|\\D)0?${dia}\\s*[/.-]\\s*0?${mes}(\\D|$)|\\b0?${dia}\\s+(de\\s+)?(${MESES[mes - 1].join("|")})\\b`);
+	return textos.some((texto) => jeitos.test(trocarNumeros(texto)));
+}
+
+// a trava do período, mais dura que a do buscar_voos, porque aqui um período inventado vira até 180 dias:
+// o mês (e o ano, se veio) ou o dia COM o mês precisam ter aparecido no que a pessoa escreveu
+function conferirPeriodo(caderno: Caderno, de?: string, ate?: string) {
+	const textos = caderno.textosDoUsuario.map(semAcento);
+	const ultimo = textos.at(-1) ?? "";
+	if (DIAS_SOLTOS.some((jeito) => jeito.test(ultimo))) throw new Error("o pedido dá dias soltos, não um período. Chame buscar_voos uma vez para cada dia.");
+	if (!de) {
+		let ultimoTemData = mesesDoTexto(ultimo).length > 0;
+		try {
+			ultimoTemData ||= Boolean(entenderData(ultimo));
+		} catch { /* sem data na mensagem */ }
+		if (ultimoTemData) throw new Error("o pedido traz data ou mês: passe o período em de e ate, como veio no pedido.");
+		if (!textos.some((texto) => MAIS_BARATO.test(texto) && DATA_NAO_IMPORTA.test(texto))) throw new Error("a pessoa não disse o mês nem as datas. Não escolha um período: pergunte.");
+		const hoje = hojeEmSaoPaulo();
+		return [somarDias(hoje, 1), somarDias(hoje, DIAS_SEM_PERIODO)];
+	}
+	for (const texto of [de, ate].filter((texto): texto is string => Boolean(texto))) {
+		const limpo = semAcento(texto).trim();
+		if (PEDACO_DE_MES.test(limpo)) throw new Error(`"${texto}" é um pedaço do mês: pergunte os dias exatos.`);
+		if (!ehMes(limpo)) {
+			const data = entenderData(texto);
+			// "natal", "amanhã" valem se a pessoa escreveu a mesma coisa; um número de dia solto, não
+			if (!textos.some((pedido) => pedido.includes(limpo)) && !diaEMesDitos(data, textos)) throw new Error(`a data ${data} não aparece no pedido com o dia e o mês. Não escolha uma data: pergunte.`);
+			continue;
+		}
+		for (const { mes, ano } of mesesDoTexto(limpo)) {
+			const nome = new RegExp(`\\b(?:${MESES[mes - 1].join("|")})\\b`);
+			if (!textos.some((pedido) => nome.test(pedido))) throw new Error(`o mês "${MESES[mes - 1][0]}" não aparece no pedido. Não escolha o período: pergunte.`);
+			if (ano && !textos.some((pedido) => pedido.includes(String(ano)))) throw new Error(`o ano ${ano} não aparece no pedido. Passe o mês como veio, sem ano.`);
+		}
+	}
+	return entenderPeriodo(de, ate);
+}
+
 // ---------- ESCREVER UM VOO ----------
 // a duração já vai em horas: o modelo nunca mais precisa converter minutos (foi assim que "1000 min" virou "10h")
 export function descreverVoo(voo: Voo) {
@@ -285,6 +389,19 @@ export function conferirLugar(caderno: Caderno, texto: string) {
 	return codigos;
 }
 
+// o destino pode ser um país inteiro ("Alemanha"): os aeroportos grandes dele. A trava é a mesma do lugar: o nome
+// do país precisa ter aparecido no que a pessoa escreveu. Cidade ou aeroporto seguem pelo conferirLugar
+const MAX_AEROPORTOS_DO_PAIS = 30;    // um calendário por aeroporto: a Alemanha tem 22, o Japão 28, os Estados Unidos 95
+function conferirDestinos(caderno: Caderno, texto: string) {
+	const pais = aeroportosDoPais(texto);
+	if (!pais) return conferirLugar(caderno, texto);
+	const textos = [...caderno.textosDoUsuario, ...(caderno.preferencias ?? [])].map(semAcento);
+	if (!textos.some((pedido) => pais.nomes.some((nome) => new RegExp(`\\b${nome.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")}\\b`).test(pedido)))) throw new Error(`"${texto}" não aparece no pedido. Não escolha o destino: pergunte.`);
+	if (pais.codigos.length === 0) throw new Error(`não conheço aeroporto grande em ${texto}. Pergunte a cidade.`);
+	if (pais.codigos.length > MAX_AEROPORTOS_DO_PAIS) throw new Error(`${texto} tem ${pais.codigos.length} aeroportos grandes, é demais para pesquisar de uma vez. Pergunte a cidade ou a região.`);
+	return pais.codigos;
+}
+
 // aceita "business", "premium economy", "primeira classe"...: o modelo não precisa acertar a palavra exata
 export function entenderClasse(texto: string) {
 	const limpo = semAcento(texto);
@@ -374,6 +491,96 @@ const buscarVoosFerramenta = tool(
 			destino: z.string().describe("Cidade ou código do aeroporto, como Lisboa ou LIS"),
 			data: z.string().describe("A data como veio no pedido, como 12/12 ou próxima sexta. Num intervalo, o primeiro dia."),
 			ate: z.string().optional().describe("Só quando o pedido dá um intervalo de dias seguidos (de 10/12 a 14/12): o último dia. Para um dia só, deixe de fora."),
+			...passageiros,
+		}),
+	},
+);
+
+// ---------- O MAIS BARATO NUM PERÍODO OU NUM PAÍS ----------
+// "Salvador para a Alemanha, dezembro ou janeiro, o que for mais barato": o buscar_voos olha no máximo 7 dias de uma
+// cidade, um dia por chamada ao Google. Aqui, uma chamada ao calendário de preços (sources/flights.ts) cobre o período
+// inteiro de uma rota; com um país, uma por aeroporto grande. O calendário é aproximado, então os dias mais baratos
+// passam pela busca de verdade, e são esses voos que entram no caderno, na planilha e na resposta.
+const PAUSA_ENTRE_CALENDARIOS = 500;
+const CONFERIDOS_NA_BUSCA = 2;    // o dia mais barato e o melhor de outra cidade (ou de outro dia)
+
+const buscarMaisBaratoFerramenta = tool(
+	async ({ origem, destino, de, ate, adultos, criancas, classe }, config) => {
+		const caderno = cadernoDe(config);
+		if (adultos + criancas > 9) throw new Error("só pesquiso até 9 passageiros de uma vez. Não pesquise com um número menor: pergunte à pessoa como dividir o grupo.");
+		const [inicio, fim] = conferirPeriodo(caderno, de, ate);
+		const origens = conferirLugar(caderno, origem);
+		const destinos = conferirDestinos(caderno, destino);
+		if (origens.some((codigo) => destinos.includes(codigo))) throw new Error("a origem e o destino são o mesmo lugar. Avise e pergunte o destino certo.");
+		const classeCerta = entenderClasse(classe);
+
+		const rotas = origens.flatMap((saida) => destinos.map((chegada) => [saida, chegada]));
+		const avisar = rotas.length >= BUSCAS_PARA_A_BARRA ? avisosDaBusca.get(caderno.conversa) : undefined;
+		const meses = de ? mesesPedidos(de, ate) : null;
+		const dias: (DiaDoCalendario & { origem: string; destino: string })[] = [];
+		const falhas: string[] = [];
+		const comeco = Date.now();
+		for (const [feitas, [saida, chegada]] of rotas.entries()) {
+			caderno.sinal?.throwIfAborted();
+			await avisar?.(barraDaBusca(feitas, rotas.length, `calendário ${saida}→${chegada}`, feitas > 1 ? ((Date.now() - comeco) / feitas) * (rotas.length - feitas) : null));
+			if (feitas > 0) await servicos.esperar(PAUSA_ENTRE_CALENDARIOS);
+			try {
+				for (const dia of await servicos.buscarCalendario(saida, chegada, inicio, fim, adultos, criancas, classeCerta, caderno.sinal)) {
+					if (!meses || meses.has(Number(dia.data.slice(5, 7)))) dias.push({ ...dia, origem: saida, destino: chegada });
+				}
+			} catch (erro: any) {
+				caderno.sinal?.throwIfAborted();
+				falhas.push(`${saida}→${chegada} (${erro.message})`);
+			}
+		}
+		const periodo = `de ${inicio} a ${fim}`;
+		// "A BUSCA FALHOU" é a marca que o verificador conhece: com ela, "a pesquisa falhou" passa e "não há voos" não
+		if (dias.length === 0) {
+			if (falhas.length > 0) return `A BUSCA FALHOU (calendário de preços): ${falhas.join("; ")}. Isso não quer dizer que não há voos: avise que a pesquisa falhou e peça para tentar de novo.`;
+			return `Nenhum voo no calendário do Google ${periodo}.`;
+		}
+		await avisar?.(barraDaBusca(rotas.length, rotas.length, "conferindo os dias mais baratos na busca de verdade", null));
+
+		const porPreco = dias.toSorted((a, b) => a.preco - b.preco || a.data.localeCompare(b.data));
+		// o primeiro de cada grupo é o mais barato dele, porque a lista já vem ordenada pelo preço
+		const melhorDeCada = (chave: (dia: (typeof dias)[number]) => string) => [...Map.groupBy(porPreco, chave).values()].map((grupo) => grupo[0]);
+		const porCidade = melhorDeCada((dia) => dia.destino);
+		const porMes = melhorDeCada((dia) => dia.data.slice(0, 7)).toSorted((a, b) => a.data.localeCompare(b.data));
+		const cidade = (iata: string) => `${nomeDaCidade(cidadeDoAeroporto(iata))} (${iata})`;
+		// sem "R$": o verificador só aceita preço com moeda, e o do calendário é aproximado. Na resposta, só o da busca de verdade
+		const linha = (dia: (typeof dias)[number]) => `${dia.data} (${diaDaSemana(dia.data)}) ${dia.origem}→${cidade(dia.destino)}: calendário ${dia.preco}`;
+
+		const conferir = [porPreco[0], porCidade.length > 1 ? porCidade[1] : porPreco.find((dia) => dia.data !== porPreco[0].data)].filter((dia) => dia !== undefined).slice(0, CONFERIDOS_NA_BUSCA);
+		const achados: Voo[] = [];
+		const avisos: string[] = [];
+		for (const dia of conferir) {
+			const busca = await pesquisarVarios(caderno, [dia.origem], [dia.destino], [dia.data], adultos, criancas, classeCerta);
+			achados.push(...busca.achados);
+			avisos.push(...busca.avisos);
+		}
+
+		return [
+			...(classeCerta === "economica" ? [] : [`Classe pesquisada: ${classeCerta}. Diga isso na resposta.`]),
+			`Calendário de preços do Google ${periodo}, só ida, ${rotas.length} rota(s): o voo mais barato de cada dia${meses ? ", só nos meses pedidos" : ""}. O número depois de "calendário" é aproximado e não é preço para a resposta: use só os preços em R$ da busca de verdade, no fim.`,
+			`O dia mais barato: ${linha(porPreco[0])}.`,
+			...(porCidade.length > 1 ? ["O mais barato de cada cidade:", ...porCidade.slice(0, 8).map(linha)] : []),
+			...(porMes.length > 1 ? ["O mais barato de cada mês:", ...porMes.map(linha)] : []),
+			"Os 5 dias mais baratos:", ...porPreco.slice(0, 5).map(linha),
+			...(falhas.length > 0 ? [`A BUSCA FALHOU no calendário de: ${falhas.join("; ")}. Diga que essas rotas ficaram de fora.`] : []),
+			"",
+			"Busca de verdade nos dias mais baratos:",
+			[...agruparPorTrecho(achados)].map(([nome, voos]) => resumirTrecho(nome, voos)).join("\n\n") || "Nenhum voo encontrado.",
+			...avisos,
+		].join("\n");
+	},
+	{
+		name: "buscar_mais_barato",
+		description: "Acha o voo mais barato num período (um mês, \"dezembro ou janeiro\", \"quando estiver mais barato\") ou para um país inteiro (Alemanha), pelo calendário de preços do Google, e confere os dias mais baratos na busca de verdade. Use quando a pessoa quer o dia ou a cidade mais barata e deu um mês, um período de mais de 7 dias ou um país, ou disse que qualquer data serve. Para um dia, ou até 7 dias seguidos numa cidade, use buscar_voos. Devolve o dia mais barato, o mais barato de cada cidade e de cada mês, e os voos de verdade dos dias mais baratos.",
+		schema: z.object({
+			origem: z.string().describe("Cidade ou código do aeroporto, como Salvador ou SSA"),
+			destino: z.string().describe("Cidade, código do aeroporto ou país, como Lisboa, LIS ou Alemanha"),
+			de: z.string().optional().describe("O período como veio no pedido: um mês (dezembro), os meses juntos (dezembro ou janeiro) ou o primeiro dia (10/12). Deixe de fora só se a pessoa disse que qualquer data serve: aí pesquiso os próximos 90 dias."),
+			ate: z.string().optional().describe("O fim do período, quando veio separado: janeiro, 31/01."),
 			...passageiros,
 		}),
 	},
@@ -802,6 +1009,7 @@ const buscarNaWebFerramenta = tool(
 // 20 buscas no Google Hotels numa resposta só. Mude à mão se a prova mostrar que algum aperta.
 export const REGISTRO = [
 	{ ferramenta: buscarVoosFerramenta, agente: "pesquisador", ligada: true, maxPorPedido: CHAMADAS_DE_BUSCA_POR_PEDIDO },
+	{ ferramenta: buscarMaisBaratoFerramenta, agente: "pesquisador", ligada: true, maxPorPedido: 3 },    // F74: os cenários calendario-* e os vizinhos de data passaram na prova de 09/11 (10 de 10)
 	{ ferramenta: buscarHospedagemFerramenta, agente: "pesquisador", ligada: true, maxPorPedido: 3 },
 	{ ferramenta: listarAeroportos, agente: "pesquisador", ligada: true, maxPorPedido: 4 },
 	{ ferramenta: diaDaSemanaFerramenta, agente: "pesquisador", ligada: true, maxPorPedido: 4 },

@@ -28,6 +28,7 @@
 import type { Voo } from "../sources/flights.ts";
 import type { Hospedagem } from "../sources/hotels.ts";
 import type { Dossie } from "../storage/database.ts";
+import { aeroportosDoPais } from "../rules/airports.ts";
 
 // ---------- OS VOOS DE MENTIRA ----------
 export const BASE = [
@@ -48,7 +49,7 @@ const FATOR_DA_CLASSE: Record<string, number> = { economica: 1, premium: 1.5, ex
 export function catalogo(origem: string, destino: string, data: string, adultos = 1, criancas = 0, classe = "economica"): Voo[] {
 	if (destino === "ZZZ" || origem === "CGH") return [];
 	const voos = destino === "REC" ? SO_UM_VOO : destino === "HND" || destino === "NRT" ? SEM_DIRETO : destino === "JFK" ? MUITOS_VOOS : BASE;
-	const extraDaRota = origem === "VCP" ? 150 : origem === "LIS" ? 100 : destino === "MAD" ? -100 : 0;
+	const extraDaRota = origem === "VCP" ? 150 : origem === "LIS" ? 100 : destino === "MAD" ? -100 : destino === "MUC" ? -80 : 0;    // MUC: a cidade mais barata da Alemanha nos cenários do calendário
 	const extraDoDia = (Number(data.slice(8, 10)) % 7) * 40;
 	return voos.map((voo) => ({
 		...voo,
@@ -113,6 +114,19 @@ export function emOrdem(...datas: string[]) {
 	return datas.every((data, i) => i === 0 || data >= datas[i - 1]);
 }
 
+// o dia e o aeroporto mais baratos do catálogo num período, como o calendário de mentira do exam.ts acha
+// (empate fica com o primeiro dia, como na ferramenta)
+export function maisBaratoNoPeriodo(origem: string, destinos: string[], de: string, ate: string) {
+	let melhor = { destino: "", data: "", preco: Infinity };
+	for (let dia = de; dia <= ate; dia = new Date(Date.parse(dia) + 86_400_000).toJSON().slice(0, 10)) {
+		for (const destino of destinos) {
+			const preco = catalogo(origem, destino, dia)[0]?.preco ?? Infinity;
+			if (preco < melhor.preco) melhor = { destino, data: dia, preco };
+		}
+	}
+	return melhor;
+}
+
 // ---------- ATALHOS ----------
 const PEDIDO = "voos de GRU para LIS em 12/12";
 const GRU_LIS = { origem: "GRU", destino: "LIS", data: proxima(12, 12) };
@@ -154,6 +168,14 @@ export type Cenario = {
 };
 
 // ---------- OS CENÁRIOS ----------
+// o calendário: dezembro é o do próximo 31/12 (a partir de hoje, se já for dezembro), e janeiro, o seguinte
+const ANO_DO_DEZEMBRO = Number(proxima(12, 31).slice(0, 4));
+const maisTarde = (a: string, b: string) => (a > b ? a : b);
+const ALEMANHA = maisBaratoNoPeriodo("SSA", aeroportosDoPais("Alemanha")!.codigos, maisTarde(`${ANO_DO_DEZEMBRO}-12-01`, daquiA(0)), `${ANO_DO_DEZEMBRO + 1}-01-31`);
+const ANO_DO_JANEIRO = Number(proxima(1, 31).slice(0, 4));
+const LISBOA_EM_JANEIRO = maisBaratoNoPeriodo("SSA", ["LIS"], maisTarde(`${ANO_DO_JANEIRO}-01-01`, daquiA(0)), `${ANO_DO_JANEIRO}-01-31`);
+const MUNIQUE_90_DIAS = maisBaratoNoPeriodo("SSA", ["MUC"], daquiA(1), daquiA(90));
+
 export const cenarios: Cenario[] = [
 	// ---------- O JEITO DE FALAR ----------
 	{ nome: "fala-girias", msgs: ["bora pra lisboa dia 12/12 saindo de GRU, acha uns voo ai mano"], busca: [GRU_LIS], cita: [LATAM] },
@@ -456,4 +478,11 @@ export const cenarios: Cenario[] = [
 	{ nome: "guia-nao-desvia-preco", msgs: ["quanto custa ir de GRU para Lisboa em 12/12?"], busca: [GRU_LIS], semWeb: true },
 	{ nome: "guia-nao-desvia-hotel", msgs: ["hotel em Lisboa de 12/12 a 15/12"], hotel: [{ cidade: "Lisboa" }], semWeb: true },
 	{ nome: "novo-troca-de-assunto", msgs: [PEDIDO, "qual a capital da Espanha?", "e o mais barato daqueles voos, qual era?"], cita: [LATAM] },
+	// ---------- O MAIS BARATO NUM PERÍODO OU NUM PAÍS (09/11) ----------
+	// o pedido do Slack de 09/11, que travou: país no destino, mês no lugar do dia, e o "sim" para a proposta do bot
+	{ nome: "calendario-alemanha-dois-meses", msgs: ["voo de Salvador para a Alemanha em dezembro ou janeiro, o que estiver mais barato"], busca: [{ origem: "SSA", destino: ALEMANHA.destino, data: ALEMANHA.data }], cita: [ALEMANHA.preco] },
+	{ nome: "calendario-conversa-do-slack", msgs: ["pesquise um voo de salvador ate a alemanha", "a que estiver mais barata e quando estiver mais barato", "o que estiver mais barato, se dezembro estiver mais barato sera dezembro, se janeiro estiver mais barato sera janeiro"], busca: [{ origem: "SSA", destino: ALEMANHA.destino, data: ALEMANHA.data }], cita: [ALEMANHA.preco] },
+	{ nome: "calendario-mes-de-uma-cidade", msgs: ["qual o dia mais barato para voar de Salvador para Lisboa em janeiro?"], busca: [{ origem: "SSA", destino: "LIS", data: LISBOA_EM_JANEIRO.data }], cita: [LISBOA_EM_JANEIRO.preco] },
+	{ nome: "calendario-sem-mes", msgs: ["quero ir de Salvador para Munique quando estiver mais barato"], busca: [{ origem: "SSA", destino: "MUC", data: MUNIQUE_90_DIAS.data }], cita: [MUNIQUE_90_DIAS.preco] },
+	{ nome: "calendario-pais-sem-data", msgs: ["pesquise um voo de salvador ate a alemanha"], semBusca: true, pergunta: true },
 ];

@@ -781,6 +781,15 @@
 			"state": "passing",
 			"evidence": "2026-11-09, commit fd515f3 com mudanças sem commit (brain/channel.ts, brain/graph.ts, brain/live.html, brain/models.ts, brain/tools.ts e mais 5): Tudo certo!",
 			"notes": "madrugada de 08→09/11; feito, em docs/AGENCIA.md, \"Memória, planilha e mensagens seguidas\". A decisão do juiz vai ao Langfuse como nota (brain/tracing.ts)"
+		},
+		{
+			"id": "F74",
+			"area": "brain",
+			"behavior": "O mais barato num período ou num país: \"voo de Salvador para a Alemanha em dezembro ou janeiro, o que estiver mais barato\" é pesquisado. A ferramenta buscar_mais_barato aceita país no destino (os aeroportos grandes dele, até 30), mês ou meses no período (até 180 dias) e, quando a pessoa diz \"quando estiver mais barato\", os próximos 90 dias. Uma chamada ao calendário de preços do Google cobre o período de uma rota; os dois dias mais baratos passam pela busca de verdade, e são esses voos que vão para a resposta. País, mês e o \"mais barato\" precisam ter sido ditos pela pessoa.",
+			"verification": "grep -q 'O MAIS BARATO NUM PERÍODO' quality/tests.ts && node quality/tests.ts",
+			"state": "passing",
+			"evidence": "2026-11-09, commit 720acb9 com mudanças sem commit (brain/agents.ts, brain/graph.ts, brain/tools.ts, docs/AGENCIA.md, docs/FUTURE.md e mais 7): Tudo certo!",
+			"notes": "pedido no Slack em 09/11 (a conversa travou e o bot contradisse a própria proposta); feito, em docs/AGENCIA.md, \"De onde vem cada dado real\" (o calendário). Prova: cenários calendario-* em quality/scenarios.ts. Prova de 09/11 (results/calendario-09-11b): 10 de 10 nos calendario-*, data-qualquer-dia, data-periodo-gigante, data-periodo-invertido, data-tres-dias-soltos e fala-telegrafico; os 12 monitor-* passaram na rodada anterior"
 		}
 	]
 }
