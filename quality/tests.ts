@@ -34,6 +34,8 @@ process.env.DADOS = ":memory:";
 process.env.MEMORIA = ":memory:";
 // vazia, o loadEnvFile do brain/tracing.ts não a troca pela do .env: nota de teste (verificador_recusou, emergencia) não vai ao failures.ts
 process.env.LANGFUSE_SECRET_KEY = "";
+// o mesmo para o Jev: com a chave do .env, o juiz falso dos testes virava o Jev de verdade (09/11, na pasta principal)
+process.env.TYPESAFE_API_KEY = "";
 const { checarMonitoramentos, paraGente } = await import("../brain/price-watch.ts");
 const { avisos: avisosDoPainel, ligarPainel, ouvinteAoVivo, resumirSaida } = await import("../brain/live.ts");
 const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, historicoLimpo, listarConversas, listarVoosParaPessoa, modelos, noContexto, parDeCidades, noFerramentas, noLembrar, noSituacao, regrasDaViagem, responder, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
