@@ -50,6 +50,17 @@
 	#grafo .no.rodando rect { stroke-width: 5; animation: pulsar .7s ease-in-out infinite alternate; }
 	#grafo .no.erro rect { stroke: #dc2626; stroke-width: 4; }
 	@keyframes pulsar { from { opacity: 1; } to { opacity: .55; } }
+	/* as setas e os rótulos: só o caminho que o pedido percorreu fica aceso; o passo de agora corre */
+	#grafo.ativo [data-arestas]:not(.usada) { opacity: .07; }
+	#grafo.ativo .no[data-ponta]:not(.feito) { opacity: .15; }
+	#grafo .seta.usada { stroke: #3f3f46; stroke-width: 2.4; }
+	#grafo .seta.recusa.usada { stroke: #dc2626; }
+	#grafo .seta.usada.agora, #grafo .seta.agora { stroke: #f59e0b !important; stroke-width: 3; stroke-dasharray: 8 6; animation: correr .45s linear infinite; }
+	@keyframes correr { to { stroke-dashoffset: -14; } }
+	#bolinha { fill: #f59e0b; filter: drop-shadow(0 0 4px #f59e0b); }
+	#grafo .no.rodando rect { filter: drop-shadow(0 0 8px currentColor); }
+	li.nova { animation: chegou 1.2s ease-out; }
+	@keyframes chegou { from { background: rgba(245,158,11,.35); } to { background: transparent; } }
 	#grafo .vezes { font-size: 12px; font-weight: 700; fill: #3f3f46; text-anchor: end; }
 	ol { list-style: none; margin: 0; padding: 0; font-size: 13px; max-height: 1000px; overflow-y: auto; border: 1px solid #e4e4e7; border-radius: 8px; }
 	li { padding: 7px 10px; border-bottom: 1px solid #f4f4f5; display: grid; grid-template-columns: 62px 1fr; gap: 2px 8px; }
@@ -69,6 +80,8 @@
 		select { background: #27272a; border-color: #3f3f46; }
 		.contas { color: #d4d4d8; }
 		#grafo .vezes { fill: #e4e4e7; }
+		#grafo .seta.usada { stroke: #e4e4e7; }
+		#grafo .seta.recusa.usada { stroke: #f87171; }
 		ol { border-color: #3f3f46; }
 		li { border-bottom-color: #27272a; }
 		li .detalhe { color: #a1a1aa; }
@@ -93,53 +106,53 @@
 	</defs>
 
 	<!-- setas: começo -->
-	<path class="seta" d="M380,48 V72" marker-end="url(#p)"/>
-	<path class="seta" d="M380,118 V142" marker-end="url(#p)"/>
-	<path class="seta" d="M380,190 V218" marker-end="url(#p)"/>
+	<path class="seta" id="seta-0" data-arestas="inicio>preparar" d="M380,48 V72" marker-end="url(#p)"/>
+	<path class="seta" id="seta-1" data-arestas="preparar>contexto" d="M380,118 V142" marker-end="url(#p)"/>
+	<path class="seta" id="seta-2" data-arestas="contexto>orquestrador" d="M380,190 V218" marker-end="url(#p)"/>
 
 	<!-- orquestrador ⇄ especialistas -->
-	<path class="seta" d="M330,282 L120,336" marker-end="url(#p)"/>
-	<path class="seta volta" d="M150,336 L345,282" marker-end="url(#p)"/>
-	<path class="seta" d="M360,282 L285,336" marker-end="url(#p)"/>
-	<path class="seta volta" d="M310,336 L372,282" marker-end="url(#p)"/>
-	<path class="seta" d="M400,282 L455,336" marker-end="url(#p)"/>
-	<path class="seta volta" d="M482,336 L415,282" marker-end="url(#p)"/>
-	<path class="seta" d="M430,282 L630,336" marker-end="url(#p)"/>
-	<path class="seta volta" d="M660,336 L445,282" marker-end="url(#p)"/>
-	<text class="rotulo" x="470" y="306">tracejado: volta ao orquestrador</text>
+	<path class="seta" id="seta-3" data-arestas="orquestrador>memoria" d="M330,282 L120,336" marker-end="url(#p)"/>
+	<path class="seta volta" id="seta-4" data-arestas="memoria>orquestrador" d="M150,336 L345,282" marker-end="url(#p)"/>
+	<path class="seta" id="seta-5" data-arestas="orquestrador>monitor" d="M360,282 L285,336" marker-end="url(#p)"/>
+	<path class="seta volta" id="seta-6" data-arestas="monitor>orquestrador" d="M310,336 L372,282" marker-end="url(#p)"/>
+	<path class="seta" id="seta-7" data-arestas="orquestrador>pesquisador" d="M400,282 L455,336" marker-end="url(#p)"/>
+	<path class="seta volta" id="seta-8" data-arestas="pesquisador>orquestrador" d="M482,336 L415,282" marker-end="url(#p)"/>
+	<path class="seta" id="seta-9" data-arestas="orquestrador>analista" d="M430,282 L630,336" marker-end="url(#p)"/>
+	<path class="seta volta" id="seta-10" data-arestas="analista>orquestrador" d="M660,336 L445,282" marker-end="url(#p)"/>
+	<text class="rotulo" x="470" y="306" data-arestas="orquestrador>memoria memoria>orquestrador orquestrador>monitor monitor>orquestrador orquestrador>pesquisador pesquisador>orquestrador orquestrador>analista analista>orquestrador">tracejado: volta ao orquestrador</text>
 
 	<!-- especialistas ⇄ ferramentas -->
-	<path class="seta" d="M110,390 L320,452" marker-start="url(#p)" marker-end="url(#p)"/>
-	<path class="seta" d="M290,390 L355,452" marker-start="url(#p)" marker-end="url(#p)"/>
-	<path class="seta" d="M470,390 L405,452" marker-start="url(#p)" marker-end="url(#p)"/>
-	<path class="seta" d="M650,390 L440,452" marker-start="url(#p)" marker-end="url(#p)"/>
+	<path class="seta" id="seta-11" data-arestas="memoria>ferramentas ferramentas>memoria" d="M110,390 L320,452" marker-start="url(#p)" marker-end="url(#p)"/>
+	<path class="seta" id="seta-12" data-arestas="monitor>ferramentas ferramentas>monitor" d="M290,390 L355,452" marker-start="url(#p)" marker-end="url(#p)"/>
+	<path class="seta" id="seta-13" data-arestas="pesquisador>ferramentas ferramentas>pesquisador" d="M470,390 L405,452" marker-start="url(#p)" marker-end="url(#p)"/>
+	<path class="seta" id="seta-14" data-arestas="analista>ferramentas ferramentas>analista" d="M650,390 L440,452" marker-start="url(#p)" marker-end="url(#p)"/>
 
 	<!-- orquestrador → conferir / situacao (pelas laterais) -->
-	<path class="seta" d="M270,258 H18 V600 H112" marker-end="url(#p)"/>
-	<text class="rotulo" x="24" y="540">plano acabou</text>
-	<path class="seta" d="M490,258 H742 V600 H648" marker-end="url(#p)"/>
-	<text class="rotulo" x="736" y="540" text-anchor="end">ninguém trabalhou ("oi")</text>
+	<path class="seta" id="seta-15" data-arestas="orquestrador>conferir" d="M270,258 H18 V600 H112" marker-end="url(#p)"/>
+	<text class="rotulo" x="24" y="540" data-arestas="orquestrador>conferir">plano acabou</text>
+	<path class="seta" id="seta-16" data-arestas="orquestrador>situacao" d="M490,258 H742 V600 H648" marker-end="url(#p)"/>
+	<text class="rotulo" x="736" y="540" text-anchor="end" data-arestas="orquestrador>situacao">ninguém trabalhou ("oi")</text>
 
 	<!-- → redator → verificar -->
-	<path class="seta" d="M200,624 L330,678" marker-end="url(#p)"/>
-	<path class="seta" d="M560,624 L430,678" marker-end="url(#p)"/>
-	<path class="seta" d="M380,726 V762" marker-end="url(#p)"/>
-	<path class="seta recusa" d="M470,786 H560 V702 H472" marker-end="url(#pv)"/>
-	<text class="rotulo vermelho" x="568" y="748">recusou: reescreve (até 2x)</text>
+	<path class="seta" id="seta-17" data-arestas="conferir>redator" d="M200,624 L330,678" marker-end="url(#p)"/>
+	<path class="seta" id="seta-18" data-arestas="situacao>redator" d="M560,624 L430,678" marker-end="url(#p)"/>
+	<path class="seta" id="seta-19" data-arestas="redator>verificar" d="M380,726 V762" marker-end="url(#p)"/>
+	<path class="seta recusa" id="seta-20" data-arestas="verificar>redator" d="M470,786 H560 V702 H472" marker-end="url(#pv)"/>
+	<text class="rotulo vermelho" x="568" y="748" data-arestas="verificar>redator">recusou: reescreve (até 2x)</text>
 
 	<!-- verificar → planilha / emergencia -->
-	<path class="seta" d="M380,810 V852" marker-end="url(#p)"/>
-	<text class="rotulo" x="388" y="836">aprovou</text>
-	<path class="seta recusa" d="M300,786 H150 V852" marker-end="url(#pv)"/>
-	<text class="rotulo vermelho" x="160" y="776">3ª recusa</text>
-	<path class="seta" d="M230,876 H288" marker-end="url(#p)"/>
+	<path class="seta" id="seta-21" data-arestas="verificar>planilha" d="M380,810 V852" marker-end="url(#p)"/>
+	<text class="rotulo" x="388" y="836" data-arestas="verificar>planilha">aprovou</text>
+	<path class="seta recusa" id="seta-22" data-arestas="verificar>emergencia" d="M300,786 H150 V852" marker-end="url(#pv)"/>
+	<text class="rotulo vermelho" x="160" y="776" data-arestas="verificar>emergencia">3ª recusa</text>
+	<path class="seta" id="seta-23" data-arestas="emergencia>planilha" d="M230,876 H288" marker-end="url(#p)"/>
 
 	<!-- planilha → lembrar → fim -->
-	<path class="seta" d="M380,900 V932" marker-end="url(#p)"/>
-	<path class="seta" d="M380,980 V1004" marker-end="url(#p)"/>
+	<path class="seta" id="seta-24" data-arestas="planilha>lembrar" d="M380,900 V932" marker-end="url(#p)"/>
+	<path class="seta" id="seta-25" data-arestas="lembrar>fim" d="M380,980 V1004" marker-end="url(#p)"/>
 
 	<!-- nós -->
-	<g class="no ponta"><rect x="330" y="12" width="100" height="36" rx="18"/><text x="380" y="35">início</text></g>
+	<g class="no ponta" data-ponta="inicio"><rect x="330" y="12" width="100" height="36" rx="18"/><text x="380" y="35">início</text></g>
 	<g class="no codigo" data-no="preparar"><rect x="290" y="72" width="180" height="46" rx="8"/><text x="380" y="92">preparar</text><text class="det" x="380" y="109">zera contadores, preço velho sai</text></g>
 	<g class="no barato" data-no="contexto"><rect x="250" y="142" width="260" height="48" rx="8"/><text x="380" y="162">contexto</text><text class="det" x="380" y="180">resume o que saiu da janela</text></g>
 	<g class="no forte" data-no="orquestrador"><rect x="270" y="218" width="220" height="64" rx="8"/><text x="380" y="242">orquestrador</text><text class="det" x="380" y="260">monta o plano, refaz até 2x</text></g>
@@ -148,7 +161,7 @@
 	<g class="no agente" data-no="monitor"><rect x="215" y="336" width="150" height="54" rx="8"/><text x="290" y="358">monitor</text><text class="det" x="290" y="376">3 ferramentas</text></g>
 	<g class="no agente" data-no="pesquisador"><rect x="395" y="336" width="150" height="54" rx="8"/><text x="470" y="358">pesquisador</text><text class="det" x="470" y="376">4 ferramentas</text></g>
 	<g class="no agente" data-no="analista"><rect x="575" y="336" width="150" height="54" rx="8"/><text x="650" y="358">analista</text><text class="det" x="650" y="376">6 ferramentas</text></g>
-	<text class="rotulo" x="380" y="410" text-anchor="middle">"pronto" só vale se terminou() confirmar · até 6 passos cada, 14 no pedido</text>
+	<text class="rotulo" x="380" y="410" text-anchor="middle" data-arestas="memoria>ferramentas monitor>ferramentas pesquisador>ferramentas analista>ferramentas">"pronto" só vale se terminou() confirmar · até 6 passos cada, 14 no pedido</text>
 
 	<g class="no codigo" data-no="ferramentas"><rect x="270" y="452" width="220" height="48" rx="8"/><text x="380" y="472">ferramentas</text><text class="det" x="380" y="490">registro confere dono e limite</text></g>
 
@@ -160,7 +173,7 @@
 	<g class="no codigo" data-no="emergencia"><rect x="70" y="852" width="160" height="48" rx="8"/><text x="150" y="872">emergencia</text><text class="det" x="150" y="890">o código responde</text></g>
 	<g class="no codigo" data-no="planilha"><rect x="290" y="852" width="180" height="48" rx="8"/><text x="380" y="872">planilha</text><text class="det" x="380" y="890">cria a planilha dos voos</text></g>
 	<g class="no barato" data-no="lembrar"><rect x="250" y="932" width="260" height="48" rx="8"/><text x="380" y="952">lembrar</text><text class="det" x="380" y="970">guarda o que a pessoa contou</text></g>
-	<g class="no ponta"><rect x="330" y="1004" width="100" height="32" rx="16"/><text x="380" y="1025">fim</text></g>
+	<g class="no ponta" data-ponta="fim"><rect x="330" y="1004" width="100" height="32" rx="16"/><text x="380" y="1025">fim</text></g>
 </svg>
 		<div class="legenda">
 			<span><i class="cor c-agente"></i>Agente · {{BARATO}}</span>
@@ -191,6 +204,37 @@
 		g.appendChild(t);
 	}
 
+	const setas = [...grafo.querySelectorAll("[data-arestas]")];
+	const pontas = Object.fromEntries([...grafo.querySelectorAll("[data-ponta]")].map((g) => [g.dataset.ponta, g]));
+	const bolinha = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+	bolinha.setAttribute("id", "bolinha");
+	bolinha.setAttribute("r", "6");
+	grafo.appendChild(bolinha);
+	let passoAnimado = null;
+	let avisosDesenhados = 0;
+
+	// a bolinha corre pela seta do passo de agora, no sentido em que o grafo andou
+	function animar(passo) {
+		if (passo === passoAnimado) return;
+		passoAnimado = passo;
+		bolinha.replaceChildren();
+		const seta = passo && setas.find((el) => el.tagName === "path" && el.dataset.arestas.split(" ").includes(passo));
+		bolinha.style.display = seta ? "" : "none";
+		if (!seta) return;
+		const ida = seta.dataset.arestas.split(" ")[0] === passo;
+		const movimento = document.createElementNS("http://www.w3.org/2000/svg", "animateMotion");
+		movimento.setAttribute("dur", "0.9s");
+		movimento.setAttribute("repeatCount", "indefinite");
+		movimento.setAttribute("keyPoints", ida ? "0;1" : "1;0");
+		movimento.setAttribute("keyTimes", "0;1");
+		movimento.setAttribute("calcMode", "linear");
+		const caminho = document.createElementNS("http://www.w3.org/2000/svg", "mpath");
+		caminho.setAttribute("href", "#" + seta.id);
+		movimento.appendChild(caminho);
+		bolinha.appendChild(movimento);
+		movimento.beginElement?.();
+	}
+
 	const hora = (iso) => new Date(iso).toLocaleTimeString("pt-BR");
 	const nomeCurto = (conversa) => conversa.length > 18 ? conversa.slice(0, 8) + "…" + conversa.slice(-6) : conversa;
 
@@ -216,7 +260,22 @@
 			g.classList.toggle("erro", erro.has(nome));
 			g.querySelector(".vezes").textContent = (vezes.get(nome) ?? 0) > 1 ? "×" + vezes.get(nome) : "";
 		}
-		const terminou = pedido.some((a) => a.no === "lembrar" && a.fase === "fim") || pedido.at(-1)?.fase === "erro";
+		const acabou = pedido.some((a) => a.no === "lembrar" && a.fase === "fim");
+		const terminou = acabou || pedido.at(-1)?.fase === "erro";
+		// os caminhos percorridos: de cada nó que começou para o próximo. O último é o passo de agora
+		const usadas = new Set();
+		let anterior = "inicio", passo = "";
+		for (const a of pedido) if (a.fase === "inicio") { passo = anterior + ">" + a.no; usadas.add(passo); anterior = a.no; }
+		if (acabou) usadas.add("lembrar>fim");
+		if (terminou) passo = "";
+		for (const el of setas) {
+			const dela = el.dataset.arestas.split(" ");
+			el.classList.toggle("usada", dela.some((aresta) => usadas.has(aresta)));
+			el.classList.toggle("agora", el.tagName === "path" && dela.includes(passo));
+		}
+		pontas.inicio.classList.toggle("feito", pedido.length > 0);
+		pontas.fim.classList.toggle("feito", acabou);
+		animar(passo);
 		const segundos = pedido.length ? Math.round(((terminou ? new Date(pedido.at(-1).hora) : new Date()) - new Date(pedido[0].hora)) / 1000) : 0;
 		document.getElementById("contas").innerHTML = pedido.length
 			? `último pedido: <b>${fortes}</b> chamada(s) {{FORTE}} · <b>${baratos}</b> {{BARATO}} · <b>${segundos}</b> s${terminou ? "" : " e contando"}`
@@ -229,11 +288,13 @@
 			if (a.fase === "inicio") comecou.set(a.no, a.hora);
 			else if (a.fase === "fim" || a.fase === "erro") a.levou = comecou.has(a.no) ? (new Date(a.hora) - new Date(comecou.get(a.no))) / 1000 : null;
 		}
+		const chegouAgora = todos.length !== avisosDesenhados;
+		avisosDesenhados = todos.length;
 		const ultimos = daConversa.filter((a) => a.fase !== "inicio" || a.no === "preparar").slice(-150).reverse();
 		if (ultimos.length === 0) return;
 		linha.replaceChildren(...ultimos.map((a) => {
 			const li = document.createElement("li");
-			li.className = a.fase + (a.no === "preparar" && a.fase === "inicio" ? " novo-pedido" : "");
+			li.className = a.fase + (a.no === "preparar" && a.fase === "inicio" ? " novo-pedido" : "") + (chegouAgora && a === ultimos[0] ? " nova" : "");
 			const textos = [["hora", hora(a.hora)], ["nome", a.fase === "modelo" ? `${a.no} chamou o modelo ${a.detalhe}` : a.fase === "inicio" ? "pedido novo" : a.no + (a.levou != null ? ` · ${a.levou.toFixed(1).replace(".", ",")} s` : "")], ["detalhe", a.fase === "modelo" ? "" : a.detalhe]];
 			for (const [classe, texto] of textos) {
 				if (!texto) continue;

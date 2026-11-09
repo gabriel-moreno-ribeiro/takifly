@@ -1339,6 +1339,13 @@ assert.equal(resumirSaida("orquestrador", { plano: [] }), "parou de replanejar: 
 const paginaDoPainel = readFileSync(import.meta.dirname + "/../brain/live.html", "utf8");
 const nosDoGrafo = Object.keys((await grafo.getGraphAsync()).nodes).filter((no) => !no.startsWith("__")).sort();
 assert.deepEqual([...paginaDoPainel.matchAll(/data-no="(\w+)"/g)].map((achado) => achado[1]).sort(), nosDoGrafo, "brain/live.html não bate com os nós de brain/graph.ts");
+// cada seta do desenho liga dois nós que existem (ou o início e o fim): senão ela nunca acenderia
+for (const [, arestas] of paginaDoPainel.matchAll(/data-arestas="([^"]+)"/g)) {
+	for (const aresta of arestas.split(" ")) {
+		const [de, para] = aresta.split(">");
+		assert.ok([...nosDoGrafo, "inicio"].includes(de) && [...nosDoGrafo, "fim"].includes(para), `brain/live.html tem a seta ${aresta}, que não liga dois nós do grafo`);
+	}
+}
 
 // a página sai do servidor só no próprio Mac, com os nomes dos modelos de brain/models.ts. Porta 0: o sistema escolhe uma livre
 const painel = ligarPainel(0)!;
