@@ -11,16 +11,16 @@ import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { AIMessage, AIMessageChunk, type BaseMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 
 import { AGENTES, planoValido } from "../brain/agents.ts";
-import { atualizarMonitoramento, buscasDoDia, criarMonitoramento, guardarPreferencia, listarHistorico, listarMonitoramentos, listarPreferencias, somarBuscasDoDia } from "../storage/database.ts";
+import { atualizarMonitoramento, buscasDoDia, criarMonitoramento, guardarPlanilhaDoPar, guardarPreferencia, listarHistorico, listarMonitoramentos, listarPreferencias, somarBuscasDoDia } from "../storage/database.ts";
 import { avisosDaBusca, barraDaBusca, conferirLugar, dataFoiDita, entenderClasse, entenderData, limparArgumentos, REGISTRO, resumirVoos, servicos, todasAsFerramentas, type Caderno } from "../brain/tools.ts";
 import { catalogo } from "./scenarios.ts";
-import { montarAbas, servicos as planilhas } from "../sources/spreadsheet.ts";
+import { abasDaPesquisa, LIMITE_DE_VOOS, montarAbas, servicos as planilhas, voosQueCabem } from "../sources/spreadsheet.ts";
 import { arrumarParaSlack, explicarErro, verificarResposta } from "../brain/checker.ts";
 import { buscarVoos, lerPagina, montarTfs, nomeDeCompanhia, precoEquivalente, type Voo } from "../sources/flights.ts";
 import { buscarHospedagem, conferirPedido as conferirPedidoDeHospedagem, descreverHospedagem, lerPagina as lerPaginaDeHotel, montarBusca, notaConfiavel, precoEquivalente as precoEquivalenteDaHospedagem, resumirHospedagens, textoDeFora } from "../sources/hotels.ts";
 import { conferirViagem, type Viagem } from "../rules/rules.ts";
 import { guardarDossie, lerDossie } from "../storage/database.ts";
-import { descreverAeroporto, distancia, limiteDeErro, paisDoAeroporto, resolverAeroportos, semelhanca } from "../rules/airports.ts";
+import { cidadeDoAeroporto, descreverAeroporto, distancia, limiteDeErro, paisDoAeroporto, resolverAeroportos, semelhanca } from "../rules/airports.ts";
 import { mandarEmail, montarPedido } from "../sources/email.ts";
 import { lerCsv } from "../rules/update-airports-data.ts";
 import { lerAchado, resumirAchados } from "../sources/web.ts";
@@ -36,7 +36,7 @@ process.env.MEMORIA = ":memory:";
 process.env.LANGFUSE_SECRET_KEY = "";
 const { checarMonitoramentos, paraGente } = await import("../brain/price-watch.ts");
 const { avisos: avisosDoPainel, ligarPainel, ouvinteAoVivo, resumirSaida } = await import("../brain/live.ts");
-const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, historicoLimpo, listarVoosParaPessoa, modelos, noContexto, noFerramentas, noLembrar, noSituacao, regrasDaViagem, responder, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
+const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, historicoLimpo, listarConversas, listarVoosParaPessoa, modelos, noContexto, parDeCidades, noFerramentas, noLembrar, noSituacao, regrasDaViagem, responder, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
 
 // ---------- HISTÓRICO ----------
 const pergunta = new HumanMessage("oi");
@@ -1254,7 +1254,7 @@ async function rodarComFalsos(conversa: string, texto: string, forte: AIMessage[
 	return { estado, ...falsos };
 }
 servicos.buscarVoos = (async (origem: string, destino: string, data: string) => [{ ...voo, origem, destino, data }, { ...barata, origem, destino, data }]) as any;
-servicos.criarPlanilha = (async () => "https://planilha.falsa/1") as any;
+servicos.atualizarPlanilha = (async (planilha: string | null) => planilha ?? "https://planilha.falsa/1") as any;
 
 // "oi": o forte faz o plano vazio e escreve; o barato nem é chamado; o redator recebe a situação atual
 let rodada = await rodarComFalsos("falso-oi", "oi", [planoFalso(), new AIMessage("Oi! Nada rodando agora. Quer que eu procure algum voo?")], []);
@@ -1266,7 +1266,7 @@ rodada = await rodarComFalsos("falso-busca", "voos de GRU para REC em 12/12",
 	[planoFalso("pesquisador"), new AIMessage("Achei voos de GRU para Recife. Quer só os diretos?")],
 	[pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "12/12" }), new AIMessage("*Pronto!*")]);    // "Pronto!" também vale, sem refazer o plano
 assert.equal(rodada.estado.buscas.length, 1);
-assert.match(rodada.estado.messages.at(-1).text, /:bar_chart: Planilha: <https:\/\/planilha\.falsa\/1\|abrir os \d+ voos na planilha>/);
+assert.match(rodada.estado.messages.at(-1).text, /:bar_chart: Planilha: <https:\/\/planilha\.falsa\/1\|abrir os \d+ voos de São Paulo–Recife na planilha>/);
 assert.match(textoDa(rodada.forte.cartas[1]), /GRU→REC/);    // o redator viu o resultado da busca
 
 // "pronto" sem ter feito a tarefa não tira o especialista do plano: o código manda ele de volta, com um bilhete
@@ -1537,6 +1537,570 @@ rodada = await rodarComFalsos("falso-guia-preco-da-web", "qual a moeda da Argent
 assert.match(textoDa(rodada.forte.cartas[2]), /R\$ 89 não veio de nenhuma ferramenta/);
 assert.equal(rodada.estado.messages.at(-1).text, "A moeda da Argentina é o peso argentino (fonte: viagem.exemplo).");
 
+// ---------- A PLANILHA POR PAR DE CIDADES ----------
+// a mesma viagem entre duas cidades fica numa planilha só, não importa o aeroporto nem o sentido
+assert.equal(cidadeDoAeroporto("VCP"), "sao paulo");    // no dado cru VCP é Campinas; a tabela à mão diz que é São Paulo
+assert.equal(cidadeDoAeroporto("LGA"), cidadeDoAeroporto("JFK"));
+assert.equal(parDeCidades("GRU", "GIG"), parDeCidades("CGH", "SDU"));
+assert.equal(parDeCidades("VCP", "GIG"), parDeCidades("SDU", "GRU"));    // a volta Rio→São Paulo cai no mesmo par
+assert.notEqual(parDeCidades("GRU", "GIG"), parDeCidades("GRU", "LIS"));
+assert.equal(parDeCidades("ZZZ", "GRU"), "ZZZ|sao paulo");    // aeroporto desconhecido não quebra: vira o próprio código
+
+// 300 voos em 3 trechos viram 100, e o mais barato, o mais rápido e o de melhor custo-benefício de cada trecho ficam
+const muitos: Voo[] = Array.from({ length: 300 }, (_, i) => ({
+	...voo, data: `2026-12-1${i % 3}`, companhia: `Cia ${i}`, preco: 1000 + ((i * 37) % 300) * 10,
+	duracao_min: 300 + ((i * 53) % 400), escalas: i % 7 === 0 ? 0 : 1 + (i % 2), link: `https://exemplo/${i}`,
+}));
+const cabem = voosQueCabem(muitos);
+assert.equal(cabem.ficam.length, LIMITE_DE_VOOS);
+assert.equal(cabem.fora, 200);
+for (const [, doTrecho] of Map.groupBy(muitos, (um) => um.data)) {
+	const menor = (nota: (um: Voo) => number) => Math.min(...doTrecho.map(nota));
+	assert.ok(cabem.ficam.some((um) => um.data === doTrecho[0].data && um.preco === menor((um) => um.preco)), "o mais barato do trecho ficou de fora");
+	assert.ok(cabem.ficam.some((um) => um.data === doTrecho[0].data && um.duracao_min === menor((um) => um.duracao_min)), "o mais rápido do trecho ficou de fora");
+	assert.ok(cabem.ficam.some((um) => um.data === doTrecho[0].data && precoEquivalente(um) === menor(precoEquivalente)), "o de melhor custo-benefício do trecho ficou de fora");
+}
+// os diretos (43 aqui) vêm antes do resto
+assert.equal(cabem.ficam.filter((um) => um.escalas === 0).length, muitos.filter((um) => um.escalas === 0).length);
+// abaixo do limite nada sai; e com mais trechos do que cabe, o mais barato de cada um ainda vem primeiro
+assert.equal(voosQueCabem(muitos.slice(0, 40)).fora, 0);
+const espalhados = muitos.map((um, i) => ({ ...um, destino: `D${String(i % 120).padStart(2, "0")}` }));
+const deCada = voosQueCabem(espalhados);
+assert.equal(deCada.ficam.length, 100);
+assert.equal(new Set(deCada.ficam.map((um) => um.destino + um.data)).size, 100);
+assert.deepEqual(deCada.garantidos, []);    // 360 trechos: nem o mais barato de cada um coube, e a planilha diz isso
+assert.match(String(abasDaPesquisa(espalhados).abas.at(-1)!.linhas[0][0]), /São trechos demais para caberem os três de cada um: o mais barato e o mais rápido e o de melhor custo-benefício de alguns trechos ficaram de fora/);
+// em cada trecho: o barato (1000, 20h), o rápido (2000, 1h) e o de custo-benefício (1100, 5h), três voos diferentes
+const quarenta = Array.from({ length: 40 }, (_, i) => [[1000, 1200], [2000, 60], [1100, 300]].map(([preco, duracao_min], j) => ({ ...voo, destino: `T${i}`, preco, duracao_min, escalas: 1, link: `https://exemplo/t${i}-${j}` }))).flat();
+assert.deepEqual(voosQueCabem(quarenta).garantidos, ["o mais barato", "o mais rápido"]);    // 40 trechos x 3 = 120: o custo-benefício é o primeiro a faltar
+// a planilha soma no máximo 100 voos em todas as abas, diz quantos ficaram de fora, e aba vazia não fica com a lista velha
+const daPesquisa = abasDaPesquisa(muitos);
+const deVoos = daPesquisa.abas.filter((aba) => aba.nome !== "Sobre esta planilha");
+assert.equal(deVoos.reduce((soma, aba) => soma + aba.linhas.length, 0), 100);
+assert.ok(daPesquisa.abas.every((aba) => aba.modo === "reescrever"));
+assert.match(String(daPesquisa.abas.at(-1)!.linhas[0][0]), /^100 voos nesta planilha e 200 ficaram de fora/);
+const semCaros = abasDaPesquisa([voo]);
+assert.deepEqual(semCaros.abas[1].linhas, [["nenhum voo aqui", "", "", "", "", "", "", "", "", "", "", ""]]);
+assert.match(String(semCaros.abas.at(-1)!.linhas[0][0]), /^Todos os 1 voos/);
+// o voo que já estava na planilha guarda a hora em que foi checado
+assert.equal(abasDaPesquisa([{ ...voo, checado: "01/12/2026 10:00 BRT" }]).abas[0].linhas[0][1], "01/12/2026 10:00 BRT");
+
+// no grafo: a primeira pesquisa do par cria, as seguintes (outros aeroportos, a volta) voltam na mesma planilha
+const pedidosDePlanilha: { planilha: string | null; abas: any[] }[] = [];
+const planilhaDeAntes = servicos.atualizarPlanilha;
+servicos.atualizarPlanilha = (async (planilha: string | null, _titulo: string, abas: any[]) => {
+	pedidosDePlanilha.push({ planilha, abas });
+	return planilha ?? `https://planilha.falsa/par-${pedidosDePlanilha.length}`;
+}) as any;
+const pesquisarNoPar = (conversa: string, origem: string, destino: string, data: string) => rodarComFalsos(conversa, `voos de ${origem} para ${destino} em ${data}`,
+	[planoFalso("pesquisador"), new AIMessage("Achei voos.")], [pediu("buscar_voos", { origem, destino, data }), new AIMessage("pronto")]);
+await pesquisarNoPar("falso-par", "GRU", "GIG", "12/12");
+await pesquisarNoPar("falso-par", "CGH", "SDU", "13/12");
+rodada = await pesquisarNoPar("falso-par", "SDU", "VCP", "20/12");
+assert.deepEqual(pedidosDePlanilha.map((pedido) => pedido.planilha), [null, "https://planilha.falsa/par-1", "https://planilha.falsa/par-1"]);
+assert.equal(pedidosDePlanilha[2].abas[0].linhas.length + pedidosDePlanilha[2].abas[1].linhas.filter((linha: unknown[]) => linha[0] !== "nenhum voo aqui").length, 6);    // os 3 trechos, 2 voos cada
+assert.match(rodada.estado.messages.at(-1).text, /:bar_chart: Planilha: <https:\/\/planilha\.falsa\/par-1\|abrir os 6 voos de Rio de Janeiro–São Paulo na planilha>/);    // no sentido desta pesquisa
+// outra conversa tem a sua planilha, mesmo no mesmo par
+await pesquisarNoPar("falso-par-outra", "GRU", "GIG", "12/12");
+assert.equal(pedidosDePlanilha.at(-1)!.planilha, null);
+// a planilha guardada sumiu do Drive: o bot tenta de novo uma vez (falha passageira não troca a planilha), cria outra e passa a usar ela
+servicos.atualizarPlanilha = (async (planilha: string | null, _titulo: string, abas: any[]) => {
+	pedidosDePlanilha.push({ planilha, abas });
+	if (planilha) throw new Error("o Google respondeu com erro 404");
+	return "https://planilha.falsa/par-nova";
+}) as any;
+await pesquisarNoPar("falso-par", "GIG", "CGH", "21/12");
+assert.deepEqual(pedidosDePlanilha.slice(-3).map((pedido) => pedido.planilha), ["https://planilha.falsa/par-1", "https://planilha.falsa/par-1", null]);
+// uma falha só, e a segunda tentativa dá certo: continua a mesma planilha
+let falhasDoGoogle = 1;
+servicos.atualizarPlanilha = (async (planilha: string | null, _titulo: string, abas: any[]) => {
+	pedidosDePlanilha.push({ planilha, abas });
+	if (planilha && falhasDoGoogle-- > 0) throw new Error("o Google respondeu com erro 500");
+	return planilha ?? "https://planilha.falsa/nao-devia";
+}) as any;
+await pesquisarNoPar("falso-par", "GRU", "SDU", "22/12");
+assert.deepEqual(pedidosDePlanilha.slice(-2).map((pedido) => pedido.planilha), ["https://planilha.falsa/par-nova", "https://planilha.falsa/par-nova"]);
+// o painel mostra o link de cada pedido, se a planilha é nova ou reaproveitada e quantos voos ficaram de fora
+const notasDaPlanilha = avisosDoPainel.filter((aviso) => aviso.conversa === "falso-par" && aviso.fase === "nota" && aviso.no === "planilha");
+assert.deepEqual(notasDaPlanilha.map((aviso) => aviso.detalhe), ["nova: São Paulo–Rio de Janeiro, 2 voos", "reaproveitada: São Paulo–Rio de Janeiro, 4 voos", "reaproveitada: Rio de Janeiro–São Paulo, 6 voos", "nova: Rio de Janeiro–São Paulo, 8 voos", "reaproveitada: São Paulo–Rio de Janeiro, 10 voos"]);
+assert.equal(notasDaPlanilha.at(-2)!.link, "https://planilha.falsa/par-nova");
+
+// o mesmo trecho pesquisado de novo troca os voos dele; voo de dia que já passou sai da planilha
+const buscaDeAntes = servicos.buscarVoos;
+const umaCompanhia = (companhia: string, quantos = 1) => (async (origem: string, destino: string, data: string) => Array.from({ length: quantos }, (_, i) => ({ ...voo, origem, destino, data, companhia, preco: 1000 + i, link: `https://voos.falsos/${companhia}-${i}` }))) as any;
+servicos.atualizarPlanilha = (async (planilha: string | null, _titulo: string, abas: any[]) => {
+	pedidosDePlanilha.push({ planilha, abas });
+	if (abas.some((aba) => aba.linhas.some((linha: unknown[]) => linha.includes("LIS")))) throw new Error("o Google respondeu com erro 500");
+	return planilha ?? `https://planilha.falsa/par-${pedidosDePlanilha.length}`;
+}) as any;
+guardarPlanilhaDoPar("falso-pares", parDeCidades("GRU", "GIG"), "https://planilha.falsa/velha", [{ ...voo, origem: "GRU", destino: "GIG", data: "2020-01-01", companhia: "Passou" }]);
+servicos.buscarVoos = umaCompanhia("Primeira");
+await pesquisarNoPar("falso-pares", "GRU", "GIG", "12/12");
+servicos.buscarVoos = umaCompanhia("Segunda");
+await pesquisarNoPar("falso-pares", "GRU", "GIG", "12/12");
+const companhiasNaPlanilha = (pedido: { abas: any[] }) => pedido.abas.filter((aba) => aba.nome !== "Sobre esta planilha").flatMap((aba) => aba.linhas.map((linha: unknown[]) => linha[3])).filter(Boolean);
+assert.deepEqual(companhiasNaPlanilha(pedidosDePlanilha.at(-2)!), ["Primeira"]);
+assert.deepEqual(companhiasNaPlanilha(pedidosDePlanilha.at(-1)!), ["Segunda"]);
+// uma pesquisa com dois pares: uma planilha por par. O par que falha guarda só os voos dele em "novos", para tentar de novo
+const doisPares = new AIMessage({ content: "", tool_calls: [{ id: "falso-pares-1", name: "buscar_voos", args: { origem: "GRU", destino: "SSA", data: "14/12" } }, { id: "falso-pares-2", name: "buscar_voos", args: { origem: "GRU", destino: "LIS", data: "14/12" } }] });
+rodada = await rodarComFalsos("falso-pares", "voos de GRU para SSA e para LIS em 14/12", [planoFalso("pesquisador"), new AIMessage("Achei voos.")], [doisPares, new AIMessage("pronto")]);
+assert.deepEqual(pedidosDePlanilha.slice(-2).map((pedido) => pedido.planilha), [null, null]);
+assert.match(rodada.estado.messages.at(-1).text, /:bar_chart: Planilha: <[^|]+\|abrir os 1 voos de São Paulo–Salvador na planilha>\nNão consegui criar a planilha de São Paulo–Lisboa agora/);
+assert.deepEqual(rodada.estado.novos.map((um: Voo) => um.destino), ["LIS"]);
+// busca de 150 voos: a planilha leva 100, e a pessoa e o painel ficam sabendo dos 50 que não couberam
+servicos.buscarVoos = umaCompanhia("Muitas", 150);
+rodada = await pesquisarNoPar("falso-pares", "GRU", "CNF", "15/12");
+assert.match(rodada.estado.messages.at(-1).text, /abrir os 100 voos de São Paulo–Belo Horizonte na planilha> \(50 não couberam\)/);
+assert.match(avisosDoPainel.filter((aviso) => aviso.conversa === "falso-pares" && aviso.no === "planilha").at(-1)!.detalhe, /^nova: São Paulo–Belo Horizonte, 100 voos, 50 ficaram de fora$/);
+servicos.buscarVoos = buscaDeAntes;
+servicos.atualizarPlanilha = planilhaDeAntes;
+
+// ---------- VER, COMPACTAR E EXCLUIR O CONTEXTO ----------
+const { compactar, retratoDaConversa, retratoParaSlack } = await import("../brain/context.ts");
+const { blocosDoContexto, comandoDeContexto, criarCanais, FAREJANDO: FAREJANDO_DO_CANAL } = await import("../brain/channel.ts");
+// só o texto exato vira ação: um pedido de viagem com a palavra no meio segue para o grafo
+assert.equal(comandoDeContexto("contexto"), "ver");
+assert.equal(comandoDeContexto("  Contexto! "), "ver");
+assert.equal(comandoDeContexto("Compactar   contexto"), "compactar");
+assert.equal(comandoDeContexto("EXCLUIR CONTEXTO."), "excluir");
+for (const frase of ["quero limpar o contexto da viagem pra Roma", "contexto da viagem", "excluir", "me explica o contexto", "compactar"]) assert.equal(comandoDeContexto(frase), null, frase);
+
+// uma conversa falsa montada direto no checkpointer: 50 mensagens (10 já fora da janela de 40), uma preferência dita de
+// passagem no começo, um "esquece" que não pode ser desfeito, voos, um documento e um monitoramento
+const doContexto = "falso-contexto";
+const naMemoria = (conversa: string) => grafo.getState({ configurable: { thread_id: conversa } });
+const montarConversa = async (conversa: string, pares: number) => {
+	const historia: BaseMessage[] = [];
+	for (let i = 0; i < pares; i++) historia.push(new HumanMessage(i === 0 ? "moro em Recife e prefiro voo direto" : i === 1 ? "esquece que moro em Recife" : `pergunta ${i}`), new AIMessage(`resposta ${i}`));
+	await grafo.updateState({ configurable: { thread_id: conversa } }, { messages: historia, voos: [voo, barata], pesquisadoEm: Date.now(), resumo: "", resumoAte: 0 }, "lembrar");
+};
+await montarConversa(doContexto, 25);
+guardarPreferencia(doContexto, "evita madrugada");
+guardarDossie(doContexto, { passaporte_validade: "2030-01-01" });
+criarMonitoramento({ conversa: doContexto, origens: "GRU", destinos: "LIS", data: "2026-12-12", data_volta: null, adultos: 1, criancas: 0, classe: "economica", preco_alvo: null, menor_preco: null, avisado_preco: null, checado_em: 0 });
+
+// o retrato: uma função só, sem modelo, para o Slack e para o painel
+const retrato = await retratoDaConversa(doContexto);
+assert.deepEqual([retrato.mensagens, retrato.naJanela, retrato.foraDaJanela, retrato.voos, retrato.pedidoPelaMetade], [50, 40, 10, 2, false]);
+assert.deepEqual(retrato.preferencias, ["evita madrugada"]);
+assert.equal(retrato.dossie?.passaporte_validade, "2030-01-01");
+assert.match(retrato.monitoramentos[0], /^#\d+: GRU→LIS em 2026-12-12/);
+const retratoNoSlack = retratoParaSlack(retrato);
+assert.match(retratoNoSlack, /40 na memória de agora e 10 mais antigas/);
+assert.match(retratoNoSlack, /Preferências: evita madrugada/);
+assert.match(retratoNoSlack, /passaporte vale até 2030-01-01/);
+assert.ok(listarConversas().includes(doContexto));
+// os dois botões, e o Excluir pede confirmação no próprio Slack
+const [, botoes] = blocosDoContexto(retratoNoSlack) as any[];
+assert.deepEqual(botoes.elements.map((botao: any) => botao.action_id), ["contexto_compactar", "contexto_excluir"]);
+assert.ok(botoes.elements[1].confirm);
+
+// o canal com uma saída falsa no lugar do Slack, e um grafo falso que só anota o que recebeu
+const ditas: { canal: string; text: string; blocks?: unknown[] }[] = [];
+const saidaFalsa = { dizer: async (canal: string, mensagem: { text: string; blocks?: unknown[] }) => (ditas.push({ canal, ...mensagem }), `m${ditas.length}`), editar: async () => {}, apagar: async () => {} };
+const pedidosAoGrafo: string[] = [];
+// o cronômetro das mensagens seguidas (F73) vence na hora: aqui o assunto é o contexto
+const relogioJa = { depois: (_ms: number, fazer: () => void) => (queueMicrotask(fazer), () => {}) };
+const deixarAndar = async () => { for (let i = 0; i < 20; i++) await new Promise((pronto) => setImmediate(pronto)); };
+const canaisFalsos = criarCanais(saidaFalsa, { responder: async (_canal: string, texto: string) => (pedidosAoGrafo.push(texto), "resposta do grafo"), relogio: relogioJa });
+await canaisFalsos.receber(doContexto, "Contexto");
+assert.match(ditas.at(-1)!.text, /O que eu lembro desta conversa/);
+assert.ok(ditas.at(-1)!.blocks);
+await canaisFalsos.receber(doContexto, "quero limpar o contexto da viagem pra Roma");
+await canaisFalsos.vazio(doContexto);
+assert.deepEqual(pedidosAoGrafo, ["quero limpar o contexto da viagem pra Roma"]);
+
+// compactar: o resumo passa pelo resumoLimpo, só "prefere voo direto" fica (o "mora em Recife" a pessoa mandou esquecer),
+// ficam as últimas mensagens e os voos, e o painel avisa
+Object.assign(modelos, { especialista: new ModeloFalso([new AIMessage("A pessoa quer ir de Recife a Lisboa. O voo custava R$ 3000."), pediu("lembrar", { guardar: ["mora em Recife", "prefere voo direto"], trocar: [] })]) });
+await canaisFalsos.receber(doContexto, "compactar contexto");
+await canaisFalsos.vazio(doContexto);
+let guardado = (await naMemoria(doContexto)).values;
+assert.equal(guardado.messages.length, 10);
+assert.equal(guardado.messages[0].getType(), "human");
+assert.equal(guardado.messages.at(-1).text, "resposta 24");
+assert.equal(guardado.voos.length, 2);
+assert.equal(guardado.resumo, "A pessoa quer ir de Recife a Lisboa.");
+assert.equal(guardado.resumoAte, 10);
+assert.deepEqual(listarPreferencias(doContexto).map((preferencia) => preferencia.texto), ["evita madrugada", "prefere voo direto"]);
+assert.match(ditas.at(-1)!.text, /saíram 40 mensagens antigas[\s\S]*ficaram as últimas 10[\s\S]*prefere voo direto/);
+assert.match(avisosDoPainel.filter((aviso) => aviso.conversa === doContexto && aviso.no === "contexto").at(-1)!.detalhe, /^compactou: /);
+// a conversa segue normal depois: o agente de contexto não resume de novo o que o resumo já cobre
+rodada = await rodarComFalsos(doContexto, "oi", [planoFalso(), new AIMessage("Oi!")], []);
+assert.equal(rodada.estado.messages.length, 12);
+// conversa curta: nada a compactar, e nenhum modelo é chamado
+assert.match(await compactar("falso-curta"), /não há o que compactar/);
+
+// o modelo falhou: nada é apagado
+await montarConversa("falso-contexto-falha", 15);
+Object.assign(modelos, { especialista: new ModeloFalso([new Error("a Ollama recusou")]) });
+assert.match(await canaisFalsos.comando("falso-contexto-falha", "compactar"), /^Não consegui compactar a conversa agora, e nada foi apagado/);
+assert.equal((await naMemoria("falso-contexto-falha")).values.messages.length, 30);
+
+// excluir: zera mensagens, resumo e voos; monitoramentos, preferências, documentos e planilhas ficam
+Object.assign(modelos, { especialista: new ModeloFalso([]) });    // não há mensagem com pista nova: não chama modelo
+await canaisFalsos.botao(doContexto, "excluir");
+guardado = (await naMemoria(doContexto)).values;
+assert.deepEqual([guardado.messages?.length ?? 0, guardado.voos?.length ?? 0, guardado.resumo ?? ""], [0, 0, ""]);    // a conversa sumiu inteira
+assert.equal(listarMonitoramentos(doContexto).length, 1);
+assert.deepEqual(listarPreferencias(doContexto).map((preferencia) => preferencia.texto), ["evita madrugada", "prefere voo direto"]);
+assert.equal(lerDossie(doContexto)?.passaporte_validade, "2030-01-01");
+assert.match(ditas.at(-1)!.text, /^Pronto, apaguei esta conversa da minha memória: 12 mensagens/);
+// excluir apaga do arquivo também: nenhum checkpoint antigo guarda a conversa
+const historicoDoExcluido = [];
+for await (const passo of grafo.getStateHistory({ configurable: { thread_id: doContexto } })) historicoDoExcluido.push(passo);
+assert.equal(historicoDoExcluido.length, 0);
+// e a próxima mensagem começa do zero, sem o estado quebrado
+rodada = await rodarComFalsos(doContexto, "oi", [planoFalso(), new AIMessage("Oi!")], []);
+assert.equal(rodada.estado.messages.length, 2);
+
+// o lote confere cada fato contra uma mensagem sozinha: "moro em São Paulo" + "prefiro ir pra Lisboa" não viram "mora em Lisboa",
+// e nada guardado é trocado pelo que a pessoa disse antes ("moro em Recife" é velho; "mora em São Paulo" já está guardado)
+const historiaDoLote = [new HumanMessage("moro em Recife"), new AIMessage("ok"), new HumanMessage("moro em São Paulo"), new AIMessage("ok"), new HumanMessage("prefiro ir pra Lisboa"), new AIMessage("ok")];
+for (let i = 0; i < 10; i++) historiaDoLote.push(new HumanMessage(`pergunta ${i}`), new AIMessage(`resposta ${i}`));
+await grafo.updateState({ configurable: { thread_id: "falso-lote" } }, { messages: historiaDoLote }, "lembrar");
+guardarPreferencia("falso-lote", "mora em São Paulo");
+Object.assign(modelos, { especialista: new ModeloFalso([new AIMessage("A pessoa quer ir a Lisboa."), pediu("lembrar", { guardar: ["mora em Lisboa", "mora em Recife", "prefere ir pra Lisboa"], trocar: ["mora em São Paulo"] })]) });
+await compactar("falso-lote");
+assert.deepEqual(listarPreferencias("falso-lote").map((preferencia) => preferencia.texto), ["mora em São Paulo", "prefere ir pra Lisboa"]);
+
+// pedido parado no meio: compactar recusa (a próxima mensagem retoma ele); excluir apaga e não sobra nada para retomar
+await montarConversa("falso-meio", 15);
+await grafo.updateState({ configurable: { thread_id: "falso-meio" } }, { plano: [] }, "preparar");
+assert.ok((await naMemoria("falso-meio")).next.length > 0);
+assert.match(await compactar("falso-meio"), /^Tem um pedido que parou no meio/);
+// e excluir com o modelo quebrando: apaga mesmo assim, e conta que não guardou preferências novas
+Object.assign(modelos, { especialista: new ModeloFalso([new Error("a Ollama recusou")]) });
+assert.match(await canaisFalsos.comando("falso-meio", "excluir"), /Não consegui guardar preferências novas desta vez/);
+assert.deepEqual((await naMemoria("falso-meio")).next, []);
+assert.equal((await naMemoria("falso-meio")).values.messages?.length ?? 0, 0);
+
+// excluir com pedido rodando: o pedido é cancelado antes (F73), senão escreveria de volta o que acabou de ser apagado
+const canaisOcupados = criarCanais(saidaFalsa, { relogio: relogioJa, responder: (_canal: string, _texto: string, _avisar: unknown, sinal?: AbortSignal) => new Promise<string>((_, falhar) => sinal?.addEventListener("abort", () => falhar(new Error("cancelado")))) });
+await canaisOcupados.receber("falso-ocupado", "voos para Lisboa");
+await deixarAndar();
+const ditasAntesDoExcluir = ditas.length;
+assert.match(await canaisOcupados.comando("falso-ocupado", "excluir"), /^Esta conversa ainda não tem nada guardado/);
+await canaisOcupados.vazio("falso-ocupado");
+assert.equal(ditas.length, ditasAntesDoExcluir);    // o pedido cancelado não respondeu nada
+assert.ok(avisosDoPainel.some((aviso) => aviso.conversa === "falso-ocupado" && aviso.no === "cancelado"));
+// compactar com pedido rodando espera ele terminar, e só então mexe na memória
+const outroPreso = Promise.withResolvers<string>();
+const canaisNaEspera = criarCanais(saidaFalsa, { responder: () => outroPreso.promise, relogio: relogioJa });
+await canaisNaEspera.receber("falso-na-espera", "voos para Lisboa");
+await deixarAndar();
+let compactou = false;
+const compactando = canaisNaEspera.comando("falso-na-espera", "compactar").then((texto) => (compactou = true, texto));
+await new Promise((pronto) => setTimeout(pronto, 50));
+assert.equal(compactou, false);
+outroPreso.resolve("ok");
+assert.match(await compactando, /não há o que compactar/);
+
+// o painel: a lista, o retrato, e o POST só com o Origin do próprio painel
+const painelDoContexto = ligarPainel(0, canaisFalsos.acoesDoPainel)!;
+await new Promise((pronto) => painelDoContexto.once("listening", pronto));
+const portaDoContexto = (painelDoContexto.address() as any).port;
+const enderecoDoContexto = `http://127.0.0.1:${portaDoContexto}`;
+assert.ok((await (await fetch(enderecoDoContexto + "/conversas")).json()).includes(doContexto));
+assert.equal((await (await fetch(`${enderecoDoContexto}/conversas/${doContexto}`)).json()).conversa, doContexto);
+const { request } = await import("node:http");
+const postar = (caminho: string, origem?: string) => new Promise<number>((pronto) => {
+	request({ host: "127.0.0.1", port: portaDoContexto, path: caminho, method: "POST", headers: origem ? { Origin: origem } : {} }, (resposta) => { resposta.resume(); pronto(resposta.statusCode!); }).end();
+});
+await montarConversa("falso-contexto-painel", 25);
+assert.equal(await postar("/conversas/falso-contexto-painel/excluir", "https://site-ruim.example.com"), 403);
+assert.equal(await postar("/conversas/falso-contexto-painel/excluir"), 403);    // sem Origin também não
+assert.equal(await postar(`/conversas/falso-contexto-painel/excluir`, `http://localhost:${portaDoContexto}.site-ruim.example.com`), 403);
+assert.equal((await naMemoria("falso-contexto-painel")).values.messages.length, 50);
+assert.equal(await postar("/conversas/nao%20vale/excluir", enderecoDoContexto), 400);
+assert.equal(await postar("/conversas/falso-contexto-painel/apagar-tudo", enderecoDoContexto), 404);
+assert.equal(await postar("/conversas/falso-contexto-painel/excluir", enderecoDoContexto), 200);
+assert.equal((await naMemoria("falso-contexto-painel")).values.messages?.length ?? 0, 0);
+assert.match(avisosDoPainel.filter((aviso) => aviso.conversa === "falso-contexto-painel" && aviso.no === "contexto").at(-1)!.detalhe, /^excluiu: /);
+painelDoContexto.closeAllConnections();
+painelDoContexto.close();
+
+// ---------- VÁRIAS MENSAGENS SEGUIDAS ----------
+const { ESPERA_POR_MAIS, PEGUEI, PRAZO_DO_JUIZ, REFAZENDO } = await import("../brain/channel.ts");
+// um relógio de mentira: o teste anda com o tempo na mão, sem esperar 5 s de verdade
+function relogioFalso() {
+	let agora = 0;
+	const marcados: { quando: number; fazer: () => void }[] = [];
+	return {
+		depois(ms: number, fazer: () => void) {
+			const marcado = { quando: agora + ms, fazer };
+			marcados.push(marcado);
+			return () => { if (marcados.includes(marcado)) marcados.splice(marcados.indexOf(marcado), 1); };
+		},
+		async avancar(ms: number) {
+			const ate = agora + ms;
+			for (;;) {
+				const proximo = marcados.filter((marcado) => marcado.quando <= ate).toSorted((a, b) => a.quando - b.quando)[0];
+				if (!proximo) break;
+				marcados.splice(marcados.indexOf(proximo), 1);
+				agora = proximo.quando;
+				proximo.fazer();
+				await deixarAndar();
+			}
+			agora = ate;
+			await deixarAndar();
+		},
+	};
+}
+// um grafo de mentira que só responde quando o teste manda, e que o cancelamento derruba como o de verdade
+// atraso: quanto o cancelamento leva para derrubar o pedido (o de verdade desfaz o pedido no checkpointer antes)
+function grafoNaMao(atraso = 0) {
+	const pedidos: { texto: string; responder: (texto: string) => void; cancelado: boolean }[] = [];
+	const responder = (_canal: string, texto: string, avisar: (progresso: string) => unknown, sinal?: AbortSignal) => new Promise<string>((ok, falhar) => {
+		const pedido = { texto, responder: ok, cancelado: false };
+		pedidos.push(pedido);
+		void avisar("procurando...");
+		sinal?.addEventListener("abort", () => {
+			pedido.cancelado = true;
+			if (atraso === 0) falhar(new Error("cancelado"));
+			else setTimeout(() => falhar(new Error("cancelado")), atraso);
+		});
+	});
+	return { pedidos, responder };
+}
+const decide = (decisao: string, motivo: string) => pediu("decidir", { decisao, motivo });
+const slack: { canal: string; text: string; id: string }[] = [];
+const apagadas: string[] = [];
+const saidaDoSlack = {
+	dizer: async (canal: string, mensagem: { text: string }) => { const id = `s${slack.length + 1}`; slack.push({ canal, text: mensagem.text, id }); return id; },
+	editar: async () => {},
+	apagar: async (_canal: string, id: string) => { apagadas.push(id); },
+};
+const textosDe = (canal: string) => slack.filter((mensagem) => mensagem.canal === canal).map((mensagem) => mensagem.text);
+
+// três mensagens em 3 s viram um pedido só, com as mensagens uma por linha
+let cronometro = relogioFalso();
+let naMao = grafoNaMao();
+let canais = criarCanais(saidaDoSlack, { responder: naMao.responder, relogio: cronometro });
+await canais.receber("falso-seguidas", "voos de GRU para LIS");
+await cronometro.avancar(1500);
+await canais.receber("falso-seguidas", "dia 12/12");
+await cronometro.avancar(1500);
+await canais.receber("falso-seguidas", "só ida");
+await cronometro.avancar(ESPERA_POR_MAIS - 1);
+assert.equal(naMao.pedidos.length, 0);    // o cronômetro foi zerado na última mensagem
+await cronometro.avancar(1);
+assert.deepEqual(naMao.pedidos.map((pedido) => pedido.texto), ["voos de GRU para LIS\ndia 12/12\nsó ida"]);
+assert.ok(avisosDoPainel.some((aviso) => aviso.conversa === "falso-seguidas" && aviso.no === "espera" && aviso.ate));
+naMao.pedidos[0].responder("Achei voos.");
+await canais.vazio("falso-seguidas");
+assert.deepEqual(textosDe("falso-seguidas"), [":taki: O Taki está farejando...", "Achei voos."]);
+
+// a mensagem a 4,9 s zera o cronômetro: o pedido só sai 5 s depois dela
+await canais.receber("falso-zera", "voos para Roma");
+await cronometro.avancar(4900);
+await canais.receber("falso-zera", "em 20/12");
+await cronometro.avancar(4900);
+assert.equal(naMao.pedidos.filter((pedido) => pedido.texto.includes("Roma")).length, 0);
+await cronometro.avancar(100);
+assert.deepEqual(naMao.pedidos.at(-1)!.texto, "voos para Roma\nem 20/12");
+naMao.pedidos.at(-1)!.responder("ok");
+await canais.vazio("falso-zera");
+
+// refazer: o pedido em andamento é cancelado e um novo começa com as mensagens dele e a nova.
+// A resposta velha nunca chega, e o aviso de progresso dele é apagado
+cronometro = relogioFalso();
+naMao = grafoNaMao();
+canais = criarCanais(saidaDoSlack, { responder: naMao.responder, relogio: cronometro });
+await canais.receber("falso-refazer", "voos de GRU para LIS em 12/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+const avisoDoPrimeiro = slack.at(-1)!.id;
+Object.assign(modelos, { especialista: new ModeloFalso([decide("refazer", "mudou a data")]) });
+await canais.receber("falso-refazer", "na verdade é dia 15");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.equal(naMao.pedidos[0].cancelado, true);
+assert.deepEqual(naMao.pedidos.map((pedido) => pedido.texto), ["voos de GRU para LIS em 12/12", "voos de GRU para LIS em 12/12\nna verdade é dia 15"]);
+assert.ok(apagadas.includes(avisoDoPrimeiro));
+naMao.pedidos[0].responder("resposta velha");    // mesmo se o grafo velho terminasse agora, nada sai
+naMao.pedidos[1].responder("Achei voos para o dia 15.");
+await canais.vazio("falso-refazer");
+assert.deepEqual(textosDe("falso-refazer").filter((texto) => !texto.includes("farejando")), [REFAZENDO, "Achei voos para o dia 15."]);
+// o painel mostra a decisão do juiz com o motivo e o cancelamento; o juiz leu o pedido e a mensagem nova
+const notasDoRefazer = avisosDoPainel.filter((aviso) => aviso.conversa === "falso-refazer" && aviso.fase === "nota").map((aviso) => `${aviso.no}: ${aviso.detalhe}`);
+assert.ok(notasDoRefazer.includes("juiz: refazer: mudou a data"));
+assert.ok(notasDoRefazer.includes("cancelado: pedido cancelado: a mensagem nova muda o pedido"));
+
+// fila: outro assunto. O pedido não é cancelado, a pessoa ganha o "Peguei" e o novo vem depois
+const juizDaFila = new ModeloFalso([decide("fila", "outro assunto")]);
+Object.assign(modelos, { especialista: juizDaFila });
+await canais.receber("falso-refazer", "voos de GRU para REC em 13/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-refazer", "e hotel em Recife?");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.match(textoDa(juizDaFila.cartas[0]), /Pedido em andamento:\nvoos de GRU para REC em 13\/12\n\nMensagem nova:\ne hotel em Recife\?/);
+assert.equal(naMao.pedidos.at(-1)!.cancelado, false);
+assert.equal(textosDe("falso-refazer").at(-1), PEGUEI);
+naMao.pedidos.at(-1)!.responder("Voos para Recife.");
+await deixarAndar();
+assert.equal(naMao.pedidos.at(-1)!.texto, "e hotel em Recife?");
+naMao.pedidos.at(-1)!.responder("Hotéis em Recife.");
+await canais.vazio("falso-refazer");
+assert.deepEqual(textosDe("falso-refazer").slice(-3).filter((texto) => !texto.includes("farejando")), ["Voos para Recife.", "Hotéis em Recife."]);
+
+// ignorar_espera: "valeu" não cancela nem cria pedido
+Object.assign(modelos, { especialista: new ModeloFalso([decide("ignorar_espera", "só agradeceu")]) });
+await canais.receber("falso-refazer", "voos de GRU para SSA em 14/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+const pedidosAntes = naMao.pedidos.length;
+await canais.receber("falso-refazer", "valeu");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.equal(naMao.pedidos.length, pedidosAntes);
+assert.equal(naMao.pedidos.at(-1)!.cancelado, false);
+naMao.pedidos.at(-1)!.responder("Voos para Salvador.");
+await canais.vazio("falso-refazer");
+
+// o juiz que quebra cai em fila: nada é cancelado e nenhuma mensagem se perde
+Object.assign(modelos, { especialista: new ModeloFalso([new Error("a Ollama recusou")]) });
+await canais.receber("falso-juiz-quebra", "voos de GRU para POA em 15/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-juiz-quebra", "e para FLN?");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.equal(naMao.pedidos.at(-1)!.cancelado, false);
+assert.equal(textosDe("falso-juiz-quebra").at(-1), PEGUEI);
+assert.match(avisosDoPainel.filter((aviso) => aviso.conversa === "falso-juiz-quebra" && aviso.no === "juiz").at(-1)!.detalhe, /^fila: o juiz falhou/);
+naMao.pedidos.at(-1)!.responder("Voos para Porto Alegre.");
+await deixarAndar();
+assert.equal(naMao.pedidos.at(-1)!.texto, "e para FLN?");
+naMao.pedidos.at(-1)!.responder("Voos para Florianópolis.");
+await canais.vazio("falso-juiz-quebra");
+
+// o juiz que demora mais que o prazo também cai em fila
+class ModeloQueNaoResponde extends ModeloFalso {
+	async _generate(): Promise<any> {
+		return new Promise(() => {});
+	}
+}
+Object.assign(modelos, { especialista: new ModeloQueNaoResponde([]) });
+await canais.receber("falso-juiz-lento", "voos de GRU para BSB em 16/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-juiz-lento", "e a volta?");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.equal(textosDe("falso-juiz-lento").at(-1), FAREJANDO_DO_CANAL);    // o juiz ainda pensa: nada decidido
+await cronometro.avancar(PRAZO_DO_JUIZ);
+assert.equal(textosDe("falso-juiz-lento").at(-1), PEGUEI);
+assert.equal(naMao.pedidos.at(-1)!.cancelado, false);
+naMao.pedidos.at(-1)!.responder("Voos para Brasília.");
+await deixarAndar();
+naMao.pedidos.at(-1)!.responder("A volta.");
+await canais.vazio("falso-juiz-lento");
+
+// dois lotes seguidos com refazer: o segundo chega quando o pedido refeito acabou de começar. Ele também é cancelado
+// e refeito com tudo junto: nenhuma mensagem se perde (antes, "e para 2 pessoas" sumia)
+// o juiz leva 30 ms em cada lote e o cancelamento leva 10 ms: o segundo lote começa a ser decidido com o pedido refeito
+// ainda na fila, e quando o juiz responde ele já está rodando (já leu o texto)
+class JuizComAtraso extends ModeloFalso {
+	async _generate(carta: BaseMessage[]): Promise<any> {
+		await new Promise((pronto) => setTimeout(pronto, 30));
+		return super._generate(carta);
+	}
+}
+naMao = grafoNaMao(10);
+canais = criarCanais(saidaDoSlack, { responder: naMao.responder, relogio: cronometro });
+Object.assign(modelos, { especialista: new JuizComAtraso([decide("refazer", "mudou a data"), decide("refazer", "mais gente")]) });
+await canais.receber("falso-dois-lotes", "voos GRU LIS 12/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-dois-lotes", "na verdade dia 15");
+await cronometro.avancar(ESPERA_POR_MAIS);    // o juiz do primeiro lote começa a pensar
+await canais.receber("falso-dois-lotes", "e para 2 pessoas");
+await cronometro.avancar(ESPERA_POR_MAIS);    // e o segundo lote entra na fila das decisões
+await new Promise((pronto) => setTimeout(pronto, 200));
+await deixarAndar();
+await cronometro.avancar(0);
+await new Promise((pronto) => setTimeout(pronto, 200));
+await deixarAndar();
+assert.deepEqual(naMao.pedidos.map((pedido) => pedido.cancelado), [true, true, false]);
+assert.equal(naMao.pedidos.at(-1)!.texto, "voos GRU LIS 12/12\nna verdade dia 15\ne para 2 pessoas");
+naMao.pedidos.at(-1)!.responder("ok");
+await canais.vazio("falso-dois-lotes");
+
+// "excluir contexto" enquanto o juiz pensa: o pedido apagado não volta; a mensagem nova vai sozinha
+const juizDemorado = Promise.withResolvers<void>();
+class JuizQueEspera extends ModeloFalso {
+	async _generate(carta: BaseMessage[]): Promise<any> {
+		await juizDemorado.promise;
+		return super._generate(carta);
+	}
+}
+Object.assign(modelos, { especialista: new JuizQueEspera([decide("refazer", "mudou a data")]) });
+await canais.receber("falso-excluir-no-meio", "voos GRU REC 12/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-excluir-no-meio", "na verdade dia 15");
+await cronometro.avancar(ESPERA_POR_MAIS);    // o juiz começou a pensar
+const excluindo = canais.comando("falso-excluir-no-meio", "excluir");
+await deixarAndar();
+juizDemorado.resolve();
+await excluindo;
+await deixarAndar();
+assert.equal(naMao.pedidos.at(-1)!.texto, "na verdade dia 15");
+naMao.pedidos.at(-1)!.responder("ok");
+await canais.vazio("falso-excluir-no-meio");
+
+// o grafo terminou, mas o cancelamento chegou antes da resposta sair: ela não sai (o grafo de mentira aqui ignora o sinal)
+const respostasPresas: ((texto: string) => void)[] = [];
+canais = criarCanais(saidaDoSlack, { relogio: cronometro, responder: () => new Promise<string>((ok) => respostasPresas.push(ok)) });
+Object.assign(modelos, { especialista: new ModeloFalso([decide("refazer", "mudou a data")]) });
+await canais.receber("falso-tarde", "voos GRU SSA 12/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-tarde", "dia 13");
+await cronometro.avancar(ESPERA_POR_MAIS);
+respostasPresas[0]("resposta velha do dia 12");
+await deixarAndar();
+respostasPresas[1]?.("resposta do dia 13");
+await canais.vazio("falso-tarde");
+assert.ok(!textosDe("falso-tarde").includes("resposta velha do dia 12"));
+assert.ok(textosDe("falso-tarde").includes("resposta do dia 13"));
+
+// cancelado no meio de uma busca grande: nenhuma busca nova vai ao Google depois do cancelamento
+const paraABusca = new AbortController();
+let buscasFeitas = 0;
+const buscaDoTeste = servicos.buscarVoos;
+servicos.buscarVoos = (async (origem: string, destino: string, data: string) => {
+	if (++buscasFeitas === 2) paraABusca.abort();
+	return [{ ...voo, origem, destino, data }];
+}) as any;
+await chamar("buscar_voos", { origem: "São Paulo", destino: "LIS", data: "12/12", ate: "13/12" }, { ...cadernoNovo(["voos de São Paulo para LIS de 12/12 a 13/12"]), sinal: paraABusca.signal });
+assert.equal(buscasFeitas, 2);    // eram 6
+servicos.buscarVoos = buscaDoTeste;
+
+// o cancelamento de verdade, no grafo: o pedido cancelado sai do checkpointer (nem mensagem nem voo dele ficam),
+// nada fica para retomar, e a mensagem seguinte responde normal, sem o "Não consegui terminar o pedido anterior"
+class ModeloPreso extends ModeloFalso {
+	chamado = Promise.withResolvers<void>();
+	async _generate(carta: BaseMessage[], opcoes: any): Promise<any> {
+		if (this.roteiro.length > 0) return super._generate(carta);
+		this.chamado.resolve();
+		return new Promise((_, falhar) => opcoes?.signal?.addEventListener("abort", () => falhar(new Error("cancelado"))));
+	}
+}
+await rodarComFalsos("falso-cancelado", "oi", [planoFalso(), new AIMessage("Oi!")], []);
+const antesDoCancelado = (await naMemoria("falso-cancelado")).values;
+const redatorPreso = new ModeloPreso([planoFalso("pesquisador")]);
+Object.assign(modelos, { forte: redatorPreso, especialista: new ModeloFalso([pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "19/12" }), new AIMessage("pronto")]) });
+const controle = new AbortController();
+const progressoDoCancelado: string[] = [];
+const cancelando = responder("falso-cancelado", "voos de GRU para REC em 19/12", (progresso: string) => { progressoDoCancelado.push(progresso); }, controle.signal);
+await redatorPreso.chamado.promise;    // o redator está escrevendo a resposta
+controle.abort();
+await assert.rejects(cancelando);
+const depoisDoCancelado = await naMemoria("falso-cancelado");
+assert.deepEqual(depoisDoCancelado.next, []);
+assert.deepEqual(depoisDoCancelado.values.messages.map((mensagem: BaseMessage) => mensagem.text), antesDoCancelado.messages.map((mensagem: BaseMessage) => mensagem.text));
+assert.equal(depoisDoCancelado.values.voos.length, antesDoCancelado.voos.length);
+const progressoAteCancelar = progressoDoCancelado.length;
+Object.assign(modelos, { forte: new ModeloFalso([planoFalso(), new AIMessage("Tudo certo por aqui.")]), especialista: new ModeloFalso([]) });
+assert.equal(await responder("falso-cancelado", "tudo bem?"), "Tudo certo por aqui.");
+assert.equal(progressoDoCancelado.length, progressoAteCancelar);    // o pedido cancelado não mexe mais no aviso
+// cancelado antes de começar: nem chega ao grafo
+const jaCancelado = new AbortController();
+jaCancelado.abort();
+await assert.rejects(responder("falso-cancelado", "voos", () => {}, jaCancelado.signal));
+assert.equal((await naMemoria("falso-cancelado")).values.messages.length, 4);
+
 // ---------- O PAINEL AO VIVO ----------
 // o ouvinte vê cada nó começar e terminar, na ordem em que o grafo roda, e cada chamada de modelo
 rodada = await rodarComFalsos("falso-painel", "voos de GRU para REC em 16/12",
@@ -1578,6 +2142,9 @@ const servida = await (await fetch(endereco)).text();
 assert.match(servida, /data-no="pesquisador"/);
 assert.match(servida, /Agente · glm-5\.3-flash/);
 assert.doesNotMatch(servida, /\{\{/);
+assert.match(servida, /id="contexto"/);    // a seção das conversas e do contexto (F72)
+// sem as ações (a prova liga o painel assim), as rotas das conversas dizem 404 em vez de quebrar
+assert.equal((await fetch(endereco + "/conversas")).status, 404);
 // um site que aponte o domínio dele para 127.0.0.1 (DNS rebinding) leva 403, e não as mensagens do Slack
 const { get } = await import("node:http");
 const deFora = await new Promise<number>((pronto) => get({ host: "127.0.0.1", port: (painel.address() as any).port, path: "/eventos", headers: { Host: "site-ruim.example.com" } }, (resposta) => { resposta.resume(); pronto(resposta.statusCode!); }));

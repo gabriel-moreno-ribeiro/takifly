@@ -8,9 +8,9 @@
 // puxa da biblioteca do Slack, as 21929129120 milhoes de bibliotecas para a biblioteca do slack funcionar e puxa apenas o que eu quero dela que é a parte de APP, ou seja, o bot em si, para ele nao apenas conseguir se conectar com o slack mas tambem conversar com ele
 import { App } from "@slack/bolt";
 
-// puxa a função responder do NOSSO arquivo brain/graph.ts (o "./" quer dizer "aqui nesta mesma pasta")
-import { responder } from "./brain/graph.ts";
-import { explicarErro } from "./brain/checker.ts";
+// puxa do NOSSO arquivo brain/channel.ts (o "./" quer dizer "aqui nesta mesma pasta") o que o bot faz com cada
+// mensagem: a fila de cada canal e os comandos de contexto. Aqui fica só a ligação com o Slack
+import { criarCanais } from "./brain/channel.ts";
 import { ligarPainel } from "./brain/live.ts";
 
 // ---------- CHAVES ----------
@@ -25,28 +25,23 @@ const app = new App({
 });
 
 // ---------- ORDEM DAS MENSAGENS ----------
-// um pedido por vez em cada canal: dois ao mesmo tempo mexeriam na mesma conversa e bagunçariam a memória
-const filaDoCanal = new Map<string, Promise<void>>();
-
-function naFila(canal: string, trabalho: () => Promise<void>) {
-	const anterior = filaDoCanal.get(canal) ?? Promise.resolve();
-	const proximo = anterior.then(trabalho, trabalho);
-	filaDoCanal.set(canal, proximo);
-	return proximo;
-}
-
 // o Slack às vezes entrega a mesma mensagem duas vezes; o "ts" é o id único de cada mensagem
 const mensagensVistas = new Set<string>();
-
-// os canais com um pedido em andamento: quem manda outra mensagem nessa hora fica sabendo que ela entrou na fila
-const ocupados = new Set<string>();
 
 // unfurl desligado: sem isso o Slack pendura um cartão de prévia do Google embaixo de cada link
 const SEM_PREVIA = { unfurl_links: false, unfurl_media: false };
 
+// a fila de cada canal (um pedido por vez) e os comandos de contexto moram em brain/channel.ts; ele fala com o
+// Slack por estas três funções. dizer devolve o "ts", o id da mensagem, para o aviso de progresso ser editado e apagado
+const canais = criarCanais({
+	dizer: async (canal, mensagem) => (await app.client.chat.postMessage({ channel: canal, ...mensagem, ...SEM_PREVIA } as any)).ts,
+	editar: (canal, id, texto) => app.client.chat.update({ channel: canal, ts: id, text: texto }),
+	apagar: (canal, id) => app.client.chat.delete({ channel: canal, ts: id }),
+});
+
 // ---------- RESPONDER ----------
 // toda vez que chegar uma mensagem, o Slack chama esta função
-app.message(async ({ message, say, client }) => {
+app.message(async ({ message, say }) => {
 	// foto, áudio ou arquivo chegam com subtype "file_share"; editada, apagada etc. têm outros subtypes e ficam de fora
 	if (message.subtype !== undefined && message.subtype !== "file_share") return;
 	if (mensagensVistas.has(message.ts)) return;
@@ -61,37 +56,26 @@ app.message(async ({ message, say, client }) => {
 		return;
 	}
 	console.log("Chegou uma mensagem: " + texto);
-
-	const canal = message.channel;
-	if (ocupados.has(canal)) await say(":taki: Peguei. Termino o pedido anterior e já vejo esse.").catch(console.log);
-
-	await naFila(canal, async () => {
-		ocupados.add(canal);
-		// uma mensagem de progresso que vai sendo editada e some no fim. Ela é só um enfeite: se falhar, o pedido segue
-		const aviso = await say(":taki: O Taki está farejando...").catch(() => undefined);
-		const idDoAviso = aviso?.ts;
-
-		try {
-			// cada canal do Slack é uma conversa separada na memória
-			const resposta = await responder(canal, texto, async (progresso) => {
-				if (idDoAviso) await client.chat.update({ channel: canal, ts: idDoAviso, text: progresso }).catch(console.log);
-			});
-			console.log("O bot respondeu: " + resposta);
-			await say({ text: resposta, ...SEM_PREVIA });
-		} catch (erro: any) {
-			console.log("Deu erro: ", erro);    // o erro técnico fica no log; a pessoa lê o que aconteceu e o que fazer
-			await say(explicarErro(erro)).catch(console.log);
-		} finally {
-			ocupados.delete(canal);
-		}
-		if (idDoAviso) await client.chat.delete({ channel: canal, ts: idDoAviso }).catch(console.log);
-	});
+	// cada canal do Slack é uma conversa separada na memória
+	await canais.receber(message.channel, texto);
 });
+
+// ---------- BOTÕES ----------
+// os botões "Compactar" e "Excluir" da resposta do "contexto". Só chegam aqui com "Interactivity" ligada no app do
+// Slack (api.slack.com → Interactivity & Shortcuts); sem ela, os textos "compactar contexto" e "excluir contexto" fazem o mesmo.
+// O ack() vem antes: o Slack desiste do clique se não ouvir nada em 3 segundos
+for (const qual of ["compactar", "excluir"] as const) {
+	app.action(`contexto_${qual}`, async ({ ack, body }) => {
+		await ack();
+		const canal = (body as any).channel?.id;
+		if (canal) await canais.botao(canal, qual);
+	});
+}
 
 // ---------- LIGAR ----------
 await app.start();
 console.log("Takifly ligado no Slack. O Taki está de orelha em pé. Ctrl+C para desligar.");
-ligarPainel();    // http://localhost:4500 mostra cada passo do grafo ao vivo (brain/live.ts)
+ligarPainel(undefined, canais.acoesDoPainel);    // http://localhost:4500 mostra cada passo do grafo ao vivo e as conversas (brain/live.ts)
 
 // ---------- MONITORAMENTOS ----------
 // o vigia de preços NÃO roda aqui: ele é outro programa (watcher.ts), para não cair junto se o bot cair.

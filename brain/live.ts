@@ -8,14 +8,16 @@
 // O painel é um enfeite: qualquer erro aqui vira uma linha no log e o bot segue respondendo.
 
 import { readFileSync } from "node:fs";
-import { createServer, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 import { nomesDosModelos } from "./models.ts";
 
 const PORTA = 4500;
 const GUARDADOS = 400;    // quantos avisos a página recebe ao abrir: dá para ver os últimos pedidos
 
-export type Aviso = { hora: string; conversa: string; no: string; fase: "inicio" | "fim" | "erro" | "modelo"; detalhe: string };
+// fase "nota": o que acontece fora de um nó (a planilha escolhida, a espera, o juiz, o cancelamento, o contexto).
+// link vira um link clicável na página; ate é quando uma espera acaba, para a página contar os segundos.
+export type Aviso = { hora: string; conversa: string; no: string; fase: "inicio" | "fim" | "erro" | "modelo" | "nota"; detalhe: string; link?: string; ate?: string };
 
 export const avisos: Aviso[] = [];
 const paginas = new Set<ServerResponse>();
@@ -24,6 +26,15 @@ function publicar(aviso: Aviso) {
 	avisos.push(aviso);
 	if (avisos.length > GUARDADOS) avisos.shift();
 	for (const pagina of paginas) pagina.write(`data: ${JSON.stringify(aviso)}\n\n`);
+}
+
+// quem está fora do grafo conta ao painel por aqui. Como o resto do painel, nunca derruba quem chamou
+export function anotarNoPainel(conversa: string, no: string, detalhe: string, extra: Pick<Aviso, "link" | "ate"> = {}) {
+	try {
+		publicar({ hora: new Date().toISOString(), conversa, no, fase: "nota", detalhe, ...extra });
+	} catch (erro: any) {
+		console.log(`[painel] aviso perdido: ${erro.message}`);
+	}
 }
 
 const corta = (texto: unknown, tamanho = 160) => String(texto ?? "").replace(/\s+/g, " ").trim().slice(0, tamanho);
@@ -91,8 +102,40 @@ export function ouvinteAoVivo(conversa: string) {
 	};
 }
 
+// ---------- AS CONVERSAS E O CONTEXTO ----------
+// o painel não importa o grafo (o grafo importa o painel): quem liga o painel entrega as ações (brain/channel.ts)
+export type AcoesDoPainel = {
+	conversas(): string[] | Promise<string[]>;
+	retrato(conversa: string): Promise<unknown>;
+	executar(conversa: string, acao: "compactar" | "excluir"): Promise<string>;
+};
+
+//   GET  /conversas                   a lista das conversas que têm memória
+//   GET  /conversas/<id>              o retrato de uma (brain/context.ts)
+//   POST /conversas/<id>/compactar    e /excluir: só com o Origin do próprio painel. Sem isto, qualquer página aberta
+//                                     no navegador poderia mandar um POST para cá e apagar a memória de alguém
+async function rotaDasConversas(pedido: IncomingMessage, resposta: ServerResponse, acoes: AcoesDoPainel | undefined, origens: string[]) {
+	const partes = new URL(pedido.url ?? "/", "http://painel").pathname.split("/").filter(Boolean).map(decodeURIComponent);
+	const json = (codigo: number, corpo: unknown) => resposta.writeHead(codigo, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(corpo));
+	const [, conversa, acao] = partes;
+	if (!acoes) return json(404, { erro: "o painel foi ligado sem as ações das conversas" });
+	if (conversa !== undefined && !/^[\w.:-]{1,80}$/.test(conversa)) return json(400, { erro: "conversa inválida" });
+	try {
+		if (pedido.method === "GET" && partes.length === 1) return json(200, await acoes.conversas());
+		if (pedido.method === "GET" && partes.length === 2) return json(200, await acoes.retrato(conversa));
+		if (pedido.method === "POST" && partes.length === 3 && (acao === "compactar" || acao === "excluir")) {
+			if (!origens.includes(pedido.headers.origin ?? "")) return json(403, { erro: "pedido de fora do painel" });
+			return json(200, { texto: await acoes.executar(conversa, acao) });
+		}
+		return json(404, { erro: "rota que não existe" });
+	} catch (erro: any) {
+		console.log(`[painel] a rota ${pedido.method} ${pedido.url} quebrou: ${erro.message}`);
+		return json(500, { erro: "não deu certo; o motivo está no log do bot" });
+	}
+}
+
 // Liga o servidor da página. Porta ocupada ou página faltando não derrubam o bot: só avisam no log.
-export function ligarPainel(porta = PORTA) {
+export function ligarPainel(porta = PORTA, acoes?: AcoesDoPainel) {
 	let pagina: string;
 	try {
 		const { forte, especialista } = nomesDosModelos();
@@ -105,8 +148,20 @@ export function ligarPainel(porta = PORTA) {
 		// só atende quem chama pelo nome do próprio Mac: um site aberto no navegador que aponte o domínio dele
 		// para 127.0.0.1 (DNS rebinding) leria as mensagens do Slack que passam por aqui
 		const minhaPorta = (servidor.address() as any)?.port;
-		if (![`localhost:${minhaPorta}`, `127.0.0.1:${minhaPorta}`].includes(pedido.headers.host ?? "")) {
+		const nomes = [`localhost:${minhaPorta}`, `127.0.0.1:${minhaPorta}`];
+		if (!nomes.includes(pedido.headers.host ?? "")) {
 			resposta.writeHead(403).end();
+			return;
+		}
+		if (pedido.url === "/conversas" || pedido.url?.startsWith("/conversas/")) {
+			void rotaDasConversas(pedido, resposta, acoes, nomes.map((nome) => "http://" + nome)).catch((erro) => {
+				console.log(`[painel] ${erro.message}`);
+				if (!resposta.headersSent) resposta.writeHead(500).end();
+			});
+			return;
+		}
+		if (pedido.method !== "GET") {
+			resposta.writeHead(405).end();
 			return;
 		}
 		if (pedido.url === "/eventos") {

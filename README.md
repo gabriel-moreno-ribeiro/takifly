@@ -23,7 +23,7 @@ Uma pasta é um trabalho. Para mudar como o bot pensa, abra `brain/`. Se uma bus
 | Pasta | O que tem |
 |---|---|
 | `bot.ts`, `watcher.ts`, `takifly.ts` | Os três programas: o bot, o vigia e quem liga os dois como serviço do Mac. |
-| `brain/` | O que decide: o grafo, os agentes, as ferramentas, o verificador, o grafo do vigia e o rastreio no Langfuse. |
+| `brain/` | O que decide: o grafo, os agentes, as ferramentas, o verificador, o grafo do vigia, o rastreio no Langfuse, a fila de cada canal (`channel.ts`) e o contexto de cada conversa (`context.ts`). |
 | `sources/` | O que fala com o mundo de fora: Google Flights, Google Hotels, Google Sheets e e-mail. |
 | `rules/` | O que o código sabe sozinho, sem IA: aeroportos do mundo, visto, vacina, passaporte. |
 | `storage/` | O que precisa durar depois de reiniciar: monitoramentos, preferências e documentos. |

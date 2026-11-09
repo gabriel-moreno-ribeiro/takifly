@@ -10,7 +10,7 @@ import { hojeEmSaoPaulo, somarDias } from "../rules/dates.ts";
 import { descreverAeroporto, nomesDoAeroporto, resolverAeroportos, semAcento } from "../rules/airports.ts";
 import { apagarPreferencia, cancelarMonitoramento, criarMonitoramento, type Dossie, guardarDossie, guardarPreferencia, listarMonitoramentos, listarPreferencias, type Monitoramento } from "../storage/database.ts";
 import { buscarHospedagem, conferirPedido as conferirPedidoDeHospedagem, resumirHospedagens } from "../sources/hotels.ts";
-import { criarPlanilha, horas } from "../sources/spreadsheet.ts";
+import { atualizarPlanilha, horas } from "../sources/spreadsheet.ts";
 import { buscarVoos, precoEquivalente, type Voo } from "../sources/flights.ts";
 import { pesquisarNaWeb, resumirAchados } from "../sources/web.ts";
 import { descreverClima, verClima } from "../sources/weather.ts";
@@ -18,7 +18,7 @@ import { regrasDeEntrada } from "../rules/rules.ts";
 
 // ---------- SERVIÇOS DE FORA ----------
 // o que sai do Mac fica neste objeto para a prova (exam.ts) poder trocar por versões de mentira
-export const servicos = { buscarVoos, buscarHospedagem, criarPlanilha, pesquisarNaWeb, verClima, esperar: (ms: number) => new Promise((pronto) => setTimeout(pronto, ms)) };
+export const servicos = { buscarVoos, buscarHospedagem, atualizarPlanilha, pesquisarNaWeb, verClima, esperar: (ms: number) => new Promise((pronto) => setTimeout(pronto, ms)) };
 
 // ---------- O AVISO DE PROGRESSO DA BUSCA ----------
 // o responder (graph.ts) guarda aqui, por conversa, a função que edita o aviso no Slack; a busca grande usa para a barra.
@@ -36,6 +36,9 @@ export type Caderno = {
 	// contava como a data "Natal" e soltava qualquer data, e o .at(-1) lia a preferência no lugar da última mensagem
 	preferencias?: string[];
 	conversa: string;            // de quem são os monitoramentos e as preferências
+	// o pedido foi cancelado (brain/channel.ts): o LangGraph para o stream, mas o nó que está rodando segue sozinho.
+	// Sem conferir isto, uma busca grande cancelada continuaria indo ao Google em segundo plano
+	sinal?: AbortSignal;
 };
 
 function cadernoDe(config: any): Caderno {
@@ -200,7 +203,9 @@ export function resumirVoos(voos: Voo[]) {
 async function pesquisar(caderno: Caderno, origem: string, destino: string, data: string, adultos: number, criancas: number, classe: string) {
 	const chave = [origem, destino, data, adultos, criancas, classe].join("|");
 	if (caderno.buscas.includes(chave)) return null;
+	caderno.sinal?.throwIfAborted();
 	if (caderno.buscas.length >= BUSCAS_SEM_PAUSA) await servicos.esperar(PAUSA_ENTRE_BUSCAS);
+	caderno.sinal?.throwIfAborted();
 	caderno.buscas.push(chave);
 
 	const buscar = () => servicos.buscarVoos(origem, destino, data, adultos, criancas, classe);
