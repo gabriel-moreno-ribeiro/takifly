@@ -156,20 +156,23 @@ Na dúvida, devolva as duas listas vazias.`;
 }
 
 // ---------- O JUIZ DAS MENSAGENS SEGUIDAS ----------
-// chegou uma mensagem enquanto um pedido do mesmo canal ainda roda: o modelo barato decide o que fazer com ela
-// (brain/channel.ts). Não fala com a pessoa: o motivo vai só para o painel e para o Langfuse.
+// chegou uma mensagem enquanto um pedido do mesmo canal ainda roda: o Jev (ou, sem a chave dele, o modelo barato)
+// decide o que fazer com ela (brain/channel.ts). Não fala com a pessoa: o motivo vai só para o painel e para o Langfuse.
 export const DECISOES_DO_JUIZ = ["refazer", "fila", "ignorar_espera", "cancelar"] as const;
 export const Decisao = z.object({
 	decisao: z.enum(DECISOES_DO_JUIZ).describe("refazer, fila, ignorar_espera ou cancelar"),
 	motivo: z.string().describe("o porquê, em poucas palavras"),
 });
 
-export const INSTRUCOES_DO_JUIZ = `O Takifly, um bot de passagens aéreas, ainda trabalha num pedido quando chega outra mensagem da mesma pessoa. Decida o que fazer com ela:
-refazer: a mensagem muda ou completa o pedido em andamento (outra data, outro destino, mais pessoas, outra classe, "na verdade...", "e pra 2 pessoas").
-fila: a mensagem é outro assunto ou outro pedido, que pode esperar o atual terminar.
-ignorar_espera: a mensagem não pede nada ("ok", "valeu", "obrigado", "tá bom").
-cancelar: a mensagem só manda parar ou desistir, sem pedir outra coisa ("para", "stop", "cancela", "esquece", "deixa pra lá", "não precisa mais").
-Se a mensagem manda parar E pede outra coisa ("esquece, quero Madri"), é refazer. Na dúvida entre refazer e fila, escolha fila. Escreva o motivo em poucas palavras.`;
+// as quatro decisões num lugar só: o Jev recebe isto como as opções da pergunta, e o modelo barato, como texto
+export const PERGUNTA_DO_JUIZ = "O Takifly, um bot de passagens aéreas, ainda trabalha num pedido quando chega outra mensagem da mesma pessoa. O que fazer com a mensagem nova? Na dúvida entre refazer e fila, escolha fila.";
+export const CRITERIOS_DO_JUIZ: Record<(typeof DECISOES_DO_JUIZ)[number], string> = {
+	refazer: "a mensagem muda ou completa o pedido em andamento (outra data, outro destino, mais pessoas, outra classe, \"na verdade...\", \"e pra 2 pessoas\"), ou manda parar e pede outra coisa junto (\"esquece, quero Madri\")",
+	fila: "a mensagem é outro assunto ou outro pedido, que pode esperar o atual terminar",
+	ignorar_espera: "a mensagem não pede nada (\"ok\", \"valeu\", \"obrigado\", \"tá bom\")",
+	cancelar: "a mensagem só manda parar ou desistir, sem pedir outra coisa (\"para\", \"stop\", \"cancela\", \"esquece\", \"deixa pra lá\", \"não precisa mais\")",
+};
+export const INSTRUCOES_DO_JUIZ = `${PERGUNTA_DO_JUIZ}\n${Object.entries(CRITERIOS_DO_JUIZ).map(([decisao, quando]) => `${decisao}: ${quando}.`).join("\n")}\nEscreva o motivo em poucas palavras.`;
 
 // o orquestrador é um modelo, então o código confere o plano: tira nomes inventados e repetidos e põe na ordem certa
 export function planoValido(agentes: string[]) {

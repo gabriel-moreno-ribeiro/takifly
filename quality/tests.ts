@@ -1965,7 +1965,7 @@ painelDoContexto.closeAllConnections();
 painelDoContexto.close();
 
 // ---------- VÁRIAS MENSAGENS SEGUIDAS ----------
-const { ESPERA_POR_MAIS, PAREI, PEGUEI, PRAZO_DO_JUIZ, REFAZENDO } = await import("../brain/channel.ts");
+const { ESPERA_POR_MAIS, lerRespostaDoJev, PAREI, PEGUEI, pedidoAoJev, PRAZO_DO_JUIZ, REFAZENDO } = await import("../brain/channel.ts");
 // um relógio de mentira: o teste anda com o tempo na mão, sem esperar de verdade
 function relogioFalso() {
 	let agora = 0;
@@ -2114,6 +2114,49 @@ await canais.vazio("falso-cancelar");
 assert.equal(naMao.pedidos.length, pedidosAntesDoStop);    // nem o "stop" nem o hotel da fila viraram pedido
 assert.deepEqual(textosDe("falso-cancelar").filter((texto) => !texto.includes("farejando")), [PEGUEI, PAREI]);
 assert.ok(avisosDoPainel.some((aviso) => aviso.conversa === "falso-cancelar" && aviso.detalhe === "pedido cancelado: a pessoa pediu para parar"));
+
+// o Jev (09/11): com a chave dele, o juiz é o Jev da TypeSafe, e o modelo da Ollama não é chamado (era lento)
+{
+	const juizDaOllama = new ModeloFalso([]);
+	Object.assign(modelos, { especialista: juizDaOllama });
+	const perguntasAoJev: string[] = [];
+	let respostaDoJev: () => Promise<any> = async () => ({ decisao: "cancelar", motivo: "Jev, 97% de confiança" });
+	const relogioDoJev = relogioFalso();
+	const grafoDoJev = grafoNaMao();
+	const canaisDoJev = criarCanais(saidaDoSlack, { responder: grafoDoJev.responder, relogio: relogioDoJev, jev: async (emAndamento, nova) => (perguntasAoJev.push(`${emAndamento} | ${nova}`), respostaDoJev()) });
+	await canaisDoJev.receber("falso-jev", "voos de GRU para FOR em 17/12");
+	await relogioDoJev.avancar(ESPERA_POR_MAIS);
+	await canaisDoJev.receber("falso-jev", "para");
+	await relogioDoJev.avancar(ESPERA_POR_MAIS);
+	assert.deepEqual(perguntasAoJev, ["voos de GRU para FOR em 17/12 | para"]);
+	assert.equal(juizDaOllama.cartas.length, 0);
+	assert.equal(grafoDoJev.pedidos.at(-1)!.cancelado, true);
+	grafoDoJev.pedidos.at(-1)!.responder("resposta velha");
+	await canaisDoJev.vazio("falso-jev");
+	assert.equal(textosDe("falso-jev").at(-1), PAREI);
+	assert.ok(avisosDoPainel.some((aviso) => aviso.conversa === "falso-jev" && aviso.detalhe === "cancelar: Jev, 97% de confiança"));
+	// o Jev fora do ar: vale fila, e a Ollama continua sem ser chamada
+	respostaDoJev = async () => { throw new Error("o Jev respondeu com erro 529"); };
+	await canaisDoJev.receber("falso-jev", "voos de GRU para FOR em 18/12");
+	await relogioDoJev.avancar(ESPERA_POR_MAIS);
+	await canaisDoJev.receber("falso-jev", "e hotel em Fortaleza?");
+	await relogioDoJev.avancar(ESPERA_POR_MAIS);
+	assert.equal(textosDe("falso-jev").at(-1), PEGUEI);
+	assert.equal(juizDaOllama.cartas.length, 0);
+	grafoDoJev.pedidos.at(-1)!.responder("Voos para Fortaleza.");
+	await deixarAndar();
+	grafoDoJev.pedidos.at(-1)!.responder("Hotéis em Fortaleza.");
+	await canaisDoJev.vazio("falso-jev");
+
+	// o pedido ao Jev: uma pergunta de escolha com as quatro decisões; a resposta só vale se for uma delas
+	const pedido = pedidoAoJev("voos de GRU para FOR", "para");
+	assert.equal(pedido.questions.decisao.type, "choice");
+	assert.deepEqual(Object.keys(pedido.questions.decisao.criteria), ["refazer", "fila", "ignorar_espera", "cancelar"]);
+	assert.deepEqual(pedido.state, { pedido_em_andamento: "voos de GRU para FOR", mensagem_nova: "para" });
+	assert.deepEqual(lerRespostaDoJev({ model: "jev-1.14.0", answers: { decisao: { choice: "cancelar", confidence: 0.934, probabilities: { cancelar: 0.934 } } } }), { decisao: "cancelar", motivo: "Jev, 93% de confiança" });
+	assert.throws(() => lerRespostaDoJev({ answers: { decisao: { choice: "talvez" } } }), /sem uma decisão válida/);
+	assert.throws(() => lerRespostaDoJev({}), /sem uma decisão válida/);
+}
 
 // o juiz que quebra cai em fila: nada é cancelado e nenhuma mensagem se perde
 Object.assign(modelos, { especialista: new ModeloFalso([new Error("a Ollama recusou")]) });
