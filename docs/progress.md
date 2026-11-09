@@ -76,6 +76,8 @@ No painel (http://localhost:4500, com o bot ligado):
 - Embaixo, "Conversas e o que o bot lembra": clique numa conversa para ver o retrato, e use Compactar ou Excluir (o Excluir pede confirmação). A conversa ganha um aviso na lista ("compactou às 10:32").
 - No desenho, ao lado de "início", aparece "⏳ esperando mais mensagens (Xs)" contando, a decisão do juiz com o motivo, ou "✖ pedido cancelado" (o desenho para de correr). Na lista, as mesmas notas aparecem em laranja.
 
+MADRUGADA TERMINADA
+
 # Estado verificado
 
 - 09/11, madrugada: F71, F72 e F73 passaram pelo `verify-feature.ts` (só `npm test`, sem crédito), na branch `gabriel-moreno-ribeiro/madrugada-memoria-planilha` (commits `7f83e0f`, `fd515f3`, `88303f1`). Nada disso está no Slack: falta push, PR, merge e restart.
