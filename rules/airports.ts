@@ -55,6 +55,33 @@ export function paisDoAeroporto(iata: string): string {
 	return regiao ? regiao.slice(0, 2) : "";
 }
 
+// ---------- O PAÍS INTEIRO ----------
+// "voo para a Alemanha": os aeroportos grandes do país. O nome de cada país vem do próprio Node (o mesmo que o
+// navegador usa para traduzir), em português e em inglês; só os apelidos que ele não conhece entram à mão.
+const APELIDOS_DE_PAIS: Record<string, string> = { "eua": "US", "usa": "US", "estados unidos da america": "US", "inglaterra": "GB", "holanda": "NL", "escocia": "GB" };
+let paisesPorNome: Map<string, string> | undefined;
+function paisPeloNome(nome: string) {
+	if (!paisesPorNome) {
+		paisesPorNome = new Map(Object.entries(APELIDOS_DE_PAIS));
+		const emPortugues = new Intl.DisplayNames(["pt-BR"], { type: "region" });
+		const emIngles = new Intl.DisplayNames(["en"], { type: "region" });
+		for (const codigo of new Set(Object.values(AEROPORTO).map((dados) => dados[0].slice(0, 2)))) {
+			for (const nomeDoPais of [emPortugues.of(codigo), emIngles.of(codigo)]) if (nomeDoPais && nomeDoPais !== codigo) paisesPorNome.set(semAcento(nomeDoPais), codigo);
+		}
+	}
+	return paisesPorNome.get(nome);
+}
+
+// devolve o país e os aeroportos grandes dele, ou null se o texto não é nome de país ("a Alemanha" e "Alemanha" valem)
+export function aeroportosDoPais(texto: string) {
+	const limpo = semAcento(texto).replace(/^(a|o|os|as|the)\s+/, "");
+	const codigo = paisPeloNome(limpo);
+	if (!codigo) return null;
+	const nomes = [...paisesPorNome!].filter(([, outro]) => outro === codigo).map(([nome]) => nome);
+	const codigos = Object.keys(AEROPORTO).filter((iata) => AEROPORTO[iata][0].startsWith(codigo + "-") && AEROPORTO[iata][2] === 3);
+	return { pais: codigo, nomes, codigos };
+}
+
 const TAMANHOS = ["de tamanho desconhecido", "pequeno", "médio", "grande"];
 
 // "DEL (New Delhi, IN, aeroporto grande)": é isto que o modelo mostra para a pessoa escolher

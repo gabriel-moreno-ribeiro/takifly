@@ -374,6 +374,132 @@ assert.match(noSituacao({ recados: [], voos: [voo, barata] } as any, semNinguem)
 // a companhia que não venceu nada também aparece na resposta da busca
 assert.match(await chamar("comparar_trechos", {}, cadernoNovo(undefined, [voo, barata, { ...voo, companhia: "Média", preco: 3500, duracao_min: 900 }])), /Média/);
 
+// ---------- O MAIS BARATO NUM PERÍODO ----------
+// 09/11: "voo de Salvador até a Alemanha, dezembro ou janeiro, o que estiver mais barato" travava em três lugares:
+// país não é cidade, mês não é dia, e o buscar_voos olha no máximo 7 dias. Pior: o bot propôs "a primeira semana de
+// dezembro" e, depois do "sim", a trava recusou a data que ele mesmo tinha proposto. O buscar_mais_barato lê o
+// calendário de preços do Google (uma chamada por rota cobre meses) e confere os dias mais baratos na busca de verdade.
+{
+	const { entenderPeriodo } = await import("../brain/tools.ts");
+	const { aeroportosDoPais } = await import("../rules/airports.ts");
+	const { lerCalendario, montarPedidoDoCalendario } = await import("../sources/flights.ts");
+	const { hojeEmSaoPaulo, somarDias } = await import("../rules/dates.ts");
+	const DIA = "2026-11-09";
+
+	// o período: mês inteiro, dois meses na ordem em que foram ditos, mês que já começou, mês que já passou
+	assert.deepEqual(entenderPeriodo("dezembro", "janeiro", DIA), ["2026-12-01", "2027-01-31"]);
+	assert.deepEqual(entenderPeriodo("dezembro ou janeiro", undefined, DIA), ["2026-12-01", "2027-01-31"]);
+	assert.deepEqual(entenderPeriodo("novembro", undefined, DIA), ["2026-11-09", "2026-11-30"]);
+	assert.deepEqual(entenderPeriodo("outubro", undefined, DIA), ["2027-10-01", "2027-10-31"]);
+	assert.deepEqual(entenderPeriodo("janeiro de 2028", undefined, DIA), ["2028-01-01", "2028-01-31"]);
+	assert.deepEqual(entenderPeriodo("10/12", "20/12", DIA), ["2026-12-10", "2026-12-20"]);
+	assert.deepEqual(entenderPeriodo("12 de dezembro", undefined, DIA), ["2026-12-12", "2026-12-12"]);
+	assert.throws(() => entenderPeriodo("dezembro", "julho", DIA), /limite é 180/);
+	assert.throws(() => entenderPeriodo("semana que vem talvez", undefined, DIA), /não entendi/);
+	// a ordem dita não importa, e cada mês é o primeiro que ainda não acabou (revisor, 09/11)
+	assert.deepEqual(entenderPeriodo("janeiro ou dezembro", undefined, DIA), ["2026-12-01", "2027-01-31"]);
+	assert.deepEqual(entenderPeriodo("dezembro ou janeiro", undefined, "2026-12-20"), ["2026-12-20", "2027-01-31"]);
+	assert.deepEqual(entenderPeriodo("janeiro", undefined, "2027-01-10"), ["2027-01-10", "2027-01-31"]);
+	assert.throws(() => entenderPeriodo("sexta-feira de dezembro", undefined, DIA), /não é um período/);
+
+	// o país: os aeroportos grandes, com ou sem artigo; cidade não é país
+	const alemanha = aeroportosDoPais("a Alemanha")!;
+	assert.equal(alemanha.pais, "DE");
+	assert.ok(["FRA", "MUC", "BER", "HAM"].every((iata) => alemanha.codigos.includes(iata)), alemanha.codigos.join(" "));
+	assert.ok(alemanha.nomes.includes("alemanha") && alemanha.nomes.includes("germany"));
+	assert.equal(aeroportosDoPais("Salvador"), null);
+	assert.equal(aeroportosDoPais("EUA")?.pais, "US");
+
+	// o pedido ao Google: dois JSON um dentro do outro, e a classe e os passageiros no lugar certo
+	const pedido = JSON.parse(JSON.parse(montarPedidoDoCalendario("SSA", "FRA", "2026-12-01", "2027-01-31", 2, 1, "executiva"))[1]);
+	assert.deepEqual(pedido[2], ["2026-12-01", "2027-01-31"]);
+	assert.equal(pedido[1][2], 2);                              // só ida
+	assert.equal(pedido[1][5], 3);                              // executiva
+	assert.deepEqual(pedido[1][6], [2, 1, 0, 0]);
+	assert.deepEqual(pedido[1][13][0][0][0][0], ["SSA", 0]);
+	assert.deepEqual(pedido[1][13][0][1][0][0], ["FRA", 0]);
+
+	// a resposta do Google: dia sem preço sai; resposta de erro (sem o terceiro campo) vira erro claro
+	const diasFalsos = [[null], [["2026-12-01", null, [[null, 1957], "x"], 1], ["2026-12-02", null, [[null, 2089], "y"], 1], ["2026-12-03", null, [[null, null], "z"], 1]]];
+	assert.deepEqual(lerCalendario(`)]}'\n\n99\n${JSON.stringify([["wrb.fr", null, JSON.stringify(diasFalsos)]])}\n25\n[["e",4]]`), [{ data: "2026-12-01", preco: 1957 }, { data: "2026-12-02", preco: 2089 }]);
+	assert.throws(() => lerCalendario(`)]}'\n\n9\n${JSON.stringify([["wrb.fr", null, null, null, null, [3]]])}`), /não devolveu o calendário/);
+
+	// a ferramenta, com o Google falso: um calendário por aeroporto da Alemanha, MUC o mais barato no último dia,
+	// BER quebrado. Os dois dias mais baratos passam pela busca de verdade
+	const buscarVoosAntes = servicos.buscarVoos;
+	const calendarioDeVerdade = servicos.buscarCalendario;
+	const calendarios: string[] = [];
+	const buscas: string[] = [];
+	esperas = [];
+	servicos.buscarCalendario = (async (origem: string, destino: string, de: string, ate: string) => {
+		calendarios.push(`${origem}→${destino}`);
+		if (destino === "BER") throw new Error("o Google respondeu com erro 500");
+		const preco = destino === "MUC" ? 1800 : 2500;
+		return [{ data: de, preco: preco + 100 }, { data: ate, preco }];
+	}) as any;
+	servicos.buscarVoos = (async (origem: string, destino: string, data: string) => (buscas.push(`${origem}→${destino} ${data}`), [{ ...voo, origem, destino, data, preco: destino === "MUC" ? 1850 : 2550 }])) as any;
+	const pedidoDaAlemanha = ["pesquise um voo de salvador ate a alemanha", "o que estiver mais barato, se dezembro estiver mais barato sera dezembro, se janeiro estiver mais barato sera janeiro"];
+	const caderno = cadernoNovo(pedidoDaAlemanha);
+	const [, fim] = entenderPeriodo("dezembro", "janeiro");
+	const resposta = await chamar("buscar_mais_barato", { origem: "Salvador", destino: "Alemanha", de: "dezembro", ate: "janeiro" }, caderno);
+	assert.equal(calendarios.length, alemanha.codigos.length);
+	assert.match(resposta, new RegExp(`O dia mais barato: ${fim} \\(.+\\) SSA→Munich \\(MUC\\): calendário 1800`));
+	assert.doesNotMatch(resposta.split("Busca de verdade")[0], /R\$\s*\d/);    // o preço aproximado do calendário não vira fato para o verificador
+	assert.match(resposta, /O mais barato de cada cidade:/);
+	assert.match(resposta, /A BUSCA FALHOU no calendário de: SSA→BER/);
+	assert.equal(buscas.length, 2);
+	assert.equal(buscas[0], `SSA→MUC ${fim}`);
+	assert.match(resposta, /Busca de verdade nos dias mais baratos:[\s\S]*R\$ 1850/);
+	assert.ok(caderno.voos.some((achado) => achado.destino === "MUC" && achado.data === fim));
+	assert.ok(esperas.includes(500));    // uma pausa pequena entre um calendário e outro
+
+	// "dezembro ou janeiro" num campo só dá o mesmo período
+	calendarios.length = 0;
+	await chamar("buscar_mais_barato", { origem: "SSA", destino: "MUC", de: "dezembro ou janeiro" }, cadernoNovo(["de Salvador para Munique em dezembro ou janeiro, o mais barato"]));
+	assert.deepEqual(calendarios, ["SSA→MUC"]);
+
+	// as travas: o país, o mês e o "qualquer data" precisam ter sido ditos pela pessoa
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "Salvador", destino: "Alemanha", de: "dezembro" }, cadernoNovo(["voo de Salvador em dezembro"])), /não aparece no pedido/);
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "Salvador", destino: "Alemanha", de: "março" }, cadernoNovo(pedidoDaAlemanha)), /"marco" não aparece no pedido/);
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "Salvador", destino: "Alemanha" }, cadernoNovo(["pesquise um voo de salvador ate a alemanha"])), /não disse o mês/);
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "Salvador", destino: "EUA", de: "dezembro" }, cadernoNovo(["Salvador para os EUA em dezembro"])), /95 aeroportos grandes|aeroportos grandes, é demais/);
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "Salvador", destino: "Munique" }, cadernoNovo(["voos de Salvador para Munique, qualquer dia serve"])), /não disse o mês/);
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "GRU", destino: "LIS", de: "10/12", ate: "18/12" }, cadernoNovo(["GRU para LIS nos dias 10/12, 15/12 e 18/12, qual o mais barato?"])), /dias soltos/);
+	// mais travas do revisor (09/11): pedaço de mês, ano não dito, dias soltos com "ou", data sem o mês, e o "sem período"
+	// recusado quando a última mensagem traz data ou mês
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "SSA", destino: "MUC", de: "primeira semana de dezembro" }, cadernoNovo(["SSA para Munique na primeira semana de dezembro"])), /pedaço do mês/);
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "SSA", destino: "MUC", de: "dezembro de 2027" }, cadernoNovo(["SSA para Munique em dezembro"])), /o ano 2027 não aparece/);
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "GRU", destino: "LIS", de: "10/12", ate: "15/12" }, cadernoNovo(["GRU para LIS em 10/12 ou 15/12, qual o mais barato?"])), /dias soltos/);
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "GRU", destino: "LIS", de: "10/12", ate: "10/03" }, cadernoNovo(["GRU para LIS a partir de 10/12, o mais barato"])), /não aparece no pedido com o dia e o mês/);
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "GRU", destino: "LIS" }, cadernoNovo(["qual o dia mais barato de GRU para LIS entre 10/12 e 14/12?"])), /passe o período em de e ate/);
+	await assert.rejects(chamar("buscar_mais_barato", { origem: "GRU", destino: "LIS" }, cadernoNovo(["qual o dia mais barato de GRU para LIS em dezembro?"])), /passe o período em de e ate/);
+	calendarios.length = 0;
+	await chamar("buscar_mais_barato", { origem: "GRU", destino: "LIS", de: "10 de dezembro", ate: "20 de janeiro" }, cadernoNovo(["GRU para LIS entre 10 de dezembro e 20 de janeiro, o mais barato"]));
+	await chamar("buscar_mais_barato", { origem: "SSA", destino: "MUC" }, cadernoNovo(["tanto faz a data, quero o mais barato de Salvador para Munique"]));
+	assert.equal(calendarios.length, 2);
+	// "dezembro ou fevereiro": o calendário vem de dezembro a fevereiro, e janeiro (o mais barato aqui) sai da conta
+	servicos.buscarCalendario = (async (_origem: string, _destino: string, de: string, ate: string) => [
+		{ data: de, preco: 3000 }, { data: `${Number(de.slice(0, 4)) + 1}-01-15`, preco: 1000 }, { data: ate, preco: 2000 },
+	]) as any;
+	const semJaneiro = await chamar("buscar_mais_barato", { origem: "SSA", destino: "MUC", de: "dezembro ou fevereiro" }, cadernoNovo(["SSA para Munique em dezembro ou fevereiro, o mais barato"]));
+	assert.match(semJaneiro, /O dia mais barato: \d{4}-02-\d\d .*calendário 2000/);
+	assert.doesNotMatch(semJaneiro, /-01-15/);
+	// sem mês, mas "quando estiver mais barato": os próximos 90 dias
+	calendarios.length = 0;
+	const semMes = await chamar("buscar_mais_barato", { origem: "Salvador", destino: "Munique" }, cadernoNovo(["Salvador para Munique, quando estiver mais barato"]));
+	assert.match(semMes, new RegExp(`de ${somarDias(hojeEmSaoPaulo(), 1)} a ${somarDias(hojeEmSaoPaulo(), 90)}`));
+
+	// tudo falhou: o erro diz que não é falta de voo
+	servicos.buscarCalendario = (async () => { throw new Error("o Google respondeu com erro 429"); }) as any;
+	assert.match(await chamar("buscar_mais_barato", { origem: "SSA", destino: "MUC", de: "dezembro" }, cadernoNovo(["SSA para Munique em dezembro"])), /A BUSCA FALHOU \(calendário de preços\)[\s\S]*não quer dizer que não há voos/);
+	// o verificador conhece a marca: com o calendário fora do ar, "a pesquisa falhou" passa e "não há voos" não
+	const calendarioFora = await chamar("buscar_mais_barato", { origem: "SSA", destino: "MUC", de: "dezembro" }, cadernoNovo(["SSA para Munique em dezembro"]));
+	assert.deepEqual(verificarResposta("A pesquisa falhou agora. Tenta de novo daqui a pouco?", calendarioFora), []);
+	assert.ok(verificarResposta("Não há voos de Salvador para Munique em dezembro.", calendarioFora).length > 0);
+	servicos.buscarVoos = buscarVoosAntes;
+	servicos.buscarCalendario = calendarioDeVerdade;
+}
+
 // ---------- O CALCULAR NÃO MULTIPLICA PASSAGEIROS ----------
 // o preço já é o total dos passageiros pesquisados: na prova, a busca foi de 2 adultos e 27760 × 2 virou "Total R$ 55.520"
 const buscaDeDois = (): Caderno => ({ ...cadernoNovo(), buscas: ["GRU|LIS|2026-12-12|2|0|executiva"] });

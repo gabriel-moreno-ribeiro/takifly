@@ -49,6 +49,16 @@ servicos.buscarVoos = async (origem: string, destino: string, data: string, adul
 	if (origem === "BSB") throw new Error("o Google pediu captcha");    // a prova de quando o Google sai do ar
 	return catalogo(origem, destino, data, adultos, criancas, classe);
 };
+// o calendário de mentira: o mais barato do catálogo em cada dia do período, como o calendário de verdade do Google
+servicos.buscarCalendario = async (origem: string, destino: string, de: string, ate: string, adultos = 1, criancas = 0, classe = "economica") => {
+	conferirPedido(origem, destino, de, adultos, criancas, classe);
+	const dias = [];
+	for (let dia = de; dia <= ate; dia = new Date(Date.parse(dia) + 86_400_000).toJSON().slice(0, 10)) {
+		const preco = catalogo(origem, destino, dia, adultos, criancas, classe)[0]?.preco;
+		if (preco) dias.push({ data: dia, preco });
+	}
+	return dias;
+};
 // a ferramenta confere o pedido (datas, 1 a 8 hóspedes) antes de chegar aqui, igual na busca de verdade
 servicos.buscarHospedagem = async (cidade: string, entrada: string, saida: string, hospedes: number) => {
 	hoteis.push({ cidade, entrada, saida, hospedes });

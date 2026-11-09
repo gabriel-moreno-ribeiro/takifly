@@ -132,6 +132,7 @@ Regra que não pode quebrar: **o modelo não responde isso de memória.** Númer
 
 **7.4 Decidir se o limite de 7 dias é do pedido ou da chamada**
 - Para "qual o dia mais barato entre 8 e 22 de julho", o modelo divide em duas chamadas de 7 dias. Desde 08/11 não há limite de buscas por pedido (só 12 chamadas da ferramenta), então as duas saem, mais devagar. Se 7 dias é um limite de produto, ele precisa ser contado por pedido. Se não é, a description do `buscar_voos` pode dizer que dá para dividir.
+- Em parte resolvido em 09/11 (F74): período de mais de 7 dias, mês inteiro ou país vai para o `buscar_mais_barato`, que lê o calendário de preços do Google numa chamada por rota. Falta a prova mostrar se o modelo ainda divide "de 8 a 22 de julho" em duas chamadas do `buscar_voos` em vez de usar o calendário.
 
 **7.5 Ajustar os `maxPorPedido` do registro**
 - Os números de hoje são escolha nossa. A prova mostra se algum aperta.

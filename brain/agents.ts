@@ -38,7 +38,9 @@ ${NAO_RESPONDA}`,
 		instrucoes: () => `Sua única tarefa é pesquisar voos. ${cabecalho()}
 Chame buscar_voos uma vez por trecho e uma vez para cada cidade citada. Passe a cidade e a data como vieram no pedido: a ferramenta entende, inclusive "próxima sexta", "Natal" e "réveillon".
 Ida e volta são dois trechos: chame buscar_voos para cada um, com a mesma origem e destino invertidos.
-Para "qual o dia mais barato" entre datas seguidas, chame buscar_voos com o primeiro dia em data e o último em ate.
+Para "qual o dia mais barato" entre datas seguidas, até 7 dias, chame buscar_voos com o primeiro dia em data e o último em ate.
+Para o mais barato num mês ou num período maior ("dezembro ou janeiro", "quando estiver mais barato") ou para um país inteiro ("Alemanha"), chame buscar_mais_barato com o país ou a cidade e o período como vieram no pedido. Ela olha o calendário inteiro de uma vez: não peça um dia específico, e não divida em semanas.
+Dias soltos ("nos dias 10/12, 15/12 e 18/12") não são período: chame buscar_voos para cada dia.
 Se o pedido novo só mudar uma parte ("e para Madri?", "e no dia 13?"), o resto do pedido anterior continua valendo: pesquise sem perguntar.
 Se o pedido falar de hotel, hospedagem ou onde ficar, chame buscar_hoteis com a cidade e as duas datas.
 Mais de 9 passageiros, ou mais de 8 hóspedes: não pesquise com um número menor. Escreva que o limite é esse e que falta saber como dividir o grupo.
@@ -95,7 +97,7 @@ Refaça o plano: devolva só os agentes que ainda precisam trabalhar. Lista vazi
 Há voos já pesquisados nesta conversa: ${temVoos ? "sim" : "não"}.
 
 Os agentes:
-- pesquisador: faz pesquisas novas de voos e de hotéis, inclusive quando o pedido muda a data, a cidade, os passageiros ou a classe.
+- pesquisador: faz pesquisas novas de voos e de hotéis, inclusive quando o pedido muda a data, a cidade, os passageiros ou a classe, e acha o dia ou a cidade mais barata de um mês, de um período ou de um país.
 - analista: responde sobre voos já pesquisados (filtrar, comparar) e faz qualquer conta.
 - monitor: cria, mostra ou cancela o acompanhamento de um preço ao longo do tempo.
 - memoria: guarda, mostra ou apaga preferências do usuário, e guarda os documentos dele (passaporte, nascimento, nacionalidade, vacina).
@@ -108,6 +110,8 @@ Exemplos da última mensagem e do plano:
 "só os diretos" -> ["analista"]
 "quanto é 2850 mais 3400?" -> ["analista"]
 "ida 12/12 e volta 20/12, quanto dá o total?" -> ["pesquisador", "analista"]
+"voo de Salvador para a Alemanha em dezembro, o mais barato" -> ["pesquisador"]
+"quero ir para Lisboa quando estiver mais barato" -> ["pesquisador"]
 "me avisa quando GRU-LIS baixar de R$ 2500" -> ["monitor"]
 "quais voos estou acompanhando?" -> ["monitor"]
 "moro em Recife, lembra disso" -> ["memoria"]
