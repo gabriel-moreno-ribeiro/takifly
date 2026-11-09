@@ -1,8 +1,10 @@
-// database.ts - o que precisa durar além da conversa: os monitoramentos e as preferências de cada conversa
+// database.ts - o que precisa durar além da conversa: os monitoramentos, as preferências e as planilhas de cada conversa
 //
 // Fica no arquivo data/dados.sqlite, ao lado do data/memoria.sqlite. O SQLite já vem dentro do Node.
 
 import { DatabaseSync } from "node:sqlite";
+
+import type { VooDaPlanilha } from "../sources/spreadsheet.ts";
 
 export type Monitoramento = {
 	id: number;
@@ -92,6 +94,14 @@ function banco() {
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				conversa TEXT NOT NULL,
 				texto TEXT NOT NULL
+			);
+			-- uma planilha por conversa e par de cidades ("rio de janeiro|sao paulo"), com os voos que estão nela
+			CREATE TABLE IF NOT EXISTS planilhas (
+				conversa TEXT NOT NULL,
+				par TEXT NOT NULL,
+				link TEXT NOT NULL,
+				voos TEXT NOT NULL DEFAULT '[]',
+				PRIMARY KEY (conversa, par)
 			);
 
 			-- views: só para uma pessoa ler o arquivo (sqlite3, DB Browser). O código continua lendo as tabelas acima.
@@ -225,4 +235,20 @@ export function listarPreferencias(conversa: string) {
 
 export function apagarPreferencia(conversa: string, id: number) {
 	return banco().prepare("DELETE FROM preferencias WHERE id = ? AND conversa = ?").run(id, conversa).changes > 0;
+}
+
+// ---------- PLANILHAS ----------
+// a planilha de cada par de cidades da conversa e os voos que estão nela: a pesquisa seguinte do par junta os
+// voos novos com estes e reescreve a mesma planilha
+export function lerPlanilhaDoPar(conversa: string, par: string) {
+	const linha = banco().prepare("SELECT link, voos FROM planilhas WHERE conversa = ? AND par = ?").get(conversa, par) as unknown as { link: string; voos: string } | undefined;
+	return linha ? { link: linha.link, voos: JSON.parse(linha.voos) as VooDaPlanilha[] } : null;
+}
+
+export function guardarPlanilhaDoPar(conversa: string, par: string, link: string, voos: VooDaPlanilha[]) {
+	banco().prepare("INSERT INTO planilhas (conversa, par, link, voos) VALUES (?, ?, ?, ?) ON CONFLICT(conversa, par) DO UPDATE SET link = excluded.link, voos = excluded.voos").run(conversa, par, link, JSON.stringify(voos));
+}
+
+export function listarPlanilhas(conversa: string) {
+	return banco().prepare("SELECT par, link FROM planilhas WHERE conversa = ? ORDER BY par").all(conversa) as unknown as { par: string; link: string }[];
 }

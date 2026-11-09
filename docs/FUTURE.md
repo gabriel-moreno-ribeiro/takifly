@@ -167,11 +167,6 @@ Regra que não pode quebrar: **o modelo não responde isso de memória.** Númer
 
 ## 10. Memória, planilha e mensagens seguidas (madrugada de 08→09/11)
 
-**10.1 Uma planilha por par de cidades, com no máximo 100 voos** (F71)
-- O quê: a mesma viagem entre duas cidades (GRU→GIG, CGH→SDU e VCP→GIG são todos São Paulo–Rio, ida e volta juntas, por conversa) fica numa planilha só. O link de cada (conversa, par) fica no `dados.sqlite`, e a segunda pesquisa reescreve a mesma planilha. Nunca passa de 100 voos: ficam o mais barato, o mais rápido e o de melhor custo-benefício de cada trecho, depois os diretos, depois o resto por custo-benefício. A planilha diz quantos ficaram de fora, e o painel mostra o link, se ela é nova ou reaproveitada e quantos foram cortados.
-- Por quê: hoje cada pesquisa cria uma planilha nova com todos os voos; a pasta do Drive enche e uma busca grande vira uma planilha que ninguém lê.
-- Onde: `noPlanilha` em `brain/graph.ts`, `montarAbas` e um corte novo em `sources/spreadsheet.ts`, a tabela `planilhas` em `storage/database.ts`, a cidade de cada aeroporto em `rules/airports.ts`, o painel (`brain/live.ts`, `brain/live.html`). Sem mudar o `sources/spreadsheet.gs`.
-
 **10.2 Ver o contexto, compactar e excluir** (F72)
 - O quê: `contexto` no Slack (e a lista de conversas no painel) mostra o retrato de uma conversa: mensagens na janela e fora dela, resumo, preferências, dossiê e monitoramentos. `compactar contexto` resume a conversa toda com o modelo barato, guarda nas preferências o que dura e apaga as mensagens antigas. `excluir contexto` guarda o que dura e zera a conversa, mantendo monitoramentos, preferências e dossiê. Botões em Block Kit no Slack e no painel.
 - Por quê: a pessoa não vê o que o bot lembra, nem consegue começar do zero sem perder o que ensinou.

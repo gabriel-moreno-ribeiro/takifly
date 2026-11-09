@@ -76,8 +76,9 @@ servicos.pesquisarNaWeb = async (pergunta: string) => {
 	// a mesma limpeza da busca de verdade: sem tags, sem links no meio do texto, tamanho limitado
 	return PAGINAS.filter(([assunto]) => assunto.test(pergunta)).slice(0, 1).map(([, title, url, content]) => lerAchado({ title, url, content }));
 };
-servicos.criarPlanilha = async (_titulo, voos) => {
-	if (voos.some((voo) => voo.destino === "DUB")) throw new Error("o Google respondeu com erro 500");    // a prova de quando a planilha falha
+servicos.atualizarPlanilha = async (planilha, _titulo, abas) => {
+	if (abas.some((aba) => aba.linhas.some((linha) => linha.includes("DUB")))) throw new Error("o Google respondeu com erro 500");    // a prova de quando a planilha falha
+	if (planilha) return planilha;    // a segunda pesquisa do mesmo par de cidades volta na mesma planilha
 	planilhas++;
 	return `https://planilha.falsa/${planilhas}`;
 };

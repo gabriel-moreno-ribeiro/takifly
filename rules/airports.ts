@@ -73,6 +73,27 @@ export function nomesDoAeroporto(codigos: string[]) {
 	return nomes;
 }
 
+// ---------- A CIDADE DO AEROPORTO ----------
+// a planilha junta a mesma viagem em qualquer aeroporto: GRU, CGH e VCP são São Paulo, GIG e SDU são o Rio.
+// A tabela à mão vem antes do dado cru, porque lá VCP é Campinas e LGA é "new york" (aqui, "nova york").
+// Devolve a chave sem acento ("sao paulo"); aeroporto desconhecido vira o próprio código.
+// shortcut: fora da tabela à mão vale o município do OurAirports, que separa aeroportos da mesma cidade (LTN é "luton",
+// LIN é "segrate") e junta cidades homônimas (as duas Santiago); a grafia que importar entra em AJUSTES
+export function cidadeDoAeroporto(iata: string) {
+	const codigo = String(iata ?? "").trim().toUpperCase();
+	const doDado = AEROPORTO[codigo] ? semAcento(AEROPORTO[codigo][1] || codigo) : codigo;
+	const irmao = AJUSTES[doDado]?.[0] ?? codigo;    // LGA → "new york" → JFK, que a tabela à mão chama de "nova york"
+	return Object.keys(AJUSTES).find((nome) => AJUSTES[nome].includes(codigo) || AJUSTES[nome].includes(irmao)) ?? doDado;
+}
+
+// "sao paulo" → "São Paulo": o nome de um aeroporto da cidade, para o título da planilha
+export function nomeDaCidade(chave: string) {
+	const nome = (AJUSTES[chave] ?? CODIGOS_DA_CIDADE[chave] ?? []).map((iata) => AEROPORTO[iata]?.[1]).find((nome) => nome && semAcento(nome) === chave);
+	// sem o nome com acento ("nova york" é JFK, "New York"), a própria chave com maiúscula.
+	// shortcut: as chaves de AJUSTES não têm acento, então sai "Milao" e "Toquio"; se incomodar, um nome com acento na tabela à mão
+	return (nome ?? chave.replace(/\b\p{L}/gu, (letra) => letra.toUpperCase())).replace(/ (De|Da|Do|Dos|Das) /g, (preposicao) => preposicao.toLowerCase());
+}
+
 // ---------- ERRO DE DIGITAÇÃO ----------
 // Distância de Levenshtein: quantas letras trocar, tirar ou pôr para uma palavra virar a outra.
 // "lisbooa" -> "lisboa" é 1. Guardo só a linha anterior da tabela, que é tudo de que a conta precisa.

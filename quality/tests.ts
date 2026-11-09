@@ -11,16 +11,16 @@ import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { AIMessage, AIMessageChunk, type BaseMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 
 import { AGENTES, planoValido } from "../brain/agents.ts";
-import { atualizarMonitoramento, buscasDoDia, criarMonitoramento, guardarPreferencia, listarHistorico, listarMonitoramentos, listarPreferencias, somarBuscasDoDia } from "../storage/database.ts";
+import { atualizarMonitoramento, buscasDoDia, criarMonitoramento, guardarPlanilhaDoPar, guardarPreferencia, listarHistorico, listarMonitoramentos, listarPreferencias, somarBuscasDoDia } from "../storage/database.ts";
 import { avisosDaBusca, barraDaBusca, conferirLugar, dataFoiDita, entenderClasse, entenderData, limparArgumentos, REGISTRO, resumirVoos, servicos, todasAsFerramentas, type Caderno } from "../brain/tools.ts";
 import { catalogo } from "./scenarios.ts";
-import { montarAbas, servicos as planilhas } from "../sources/spreadsheet.ts";
+import { abasDaPesquisa, LIMITE_DE_VOOS, montarAbas, servicos as planilhas, voosQueCabem } from "../sources/spreadsheet.ts";
 import { arrumarParaSlack, explicarErro, verificarResposta } from "../brain/checker.ts";
 import { buscarVoos, lerPagina, montarTfs, nomeDeCompanhia, precoEquivalente, type Voo } from "../sources/flights.ts";
 import { buscarHospedagem, conferirPedido as conferirPedidoDeHospedagem, descreverHospedagem, lerPagina as lerPaginaDeHotel, montarBusca, notaConfiavel, precoEquivalente as precoEquivalenteDaHospedagem, resumirHospedagens, textoDeFora } from "../sources/hotels.ts";
 import { conferirViagem, type Viagem } from "../rules/rules.ts";
 import { guardarDossie, lerDossie } from "../storage/database.ts";
-import { descreverAeroporto, distancia, limiteDeErro, paisDoAeroporto, resolverAeroportos, semelhanca } from "../rules/airports.ts";
+import { cidadeDoAeroporto, descreverAeroporto, distancia, limiteDeErro, paisDoAeroporto, resolverAeroportos, semelhanca } from "../rules/airports.ts";
 import { mandarEmail, montarPedido } from "../sources/email.ts";
 import { lerCsv } from "../rules/update-airports-data.ts";
 import { lerAchado, resumirAchados } from "../sources/web.ts";
@@ -36,7 +36,7 @@ process.env.MEMORIA = ":memory:";
 process.env.LANGFUSE_SECRET_KEY = "";
 const { checarMonitoramentos, paraGente } = await import("../brain/price-watch.ts");
 const { avisos: avisosDoPainel, ligarPainel, ouvinteAoVivo, resumirSaida } = await import("../brain/live.ts");
-const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, historicoLimpo, listarVoosParaPessoa, modelos, noContexto, noFerramentas, noLembrar, noSituacao, regrasDaViagem, responder, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
+const { comIdNovo, cortarHistorico, descreverChamada, descreverPasso, fatosParaGuardar, grafo, historicoLimpo, listarVoosParaPessoa, modelos, noContexto, parDeCidades, noFerramentas, noLembrar, noSituacao, regrasDaViagem, responder, resumoLimpo, terminou, viagemDosVoos, voosDestePedido } = await import("../brain/graph.ts");
 
 // ---------- HISTÓRICO ----------
 const pergunta = new HumanMessage("oi");
@@ -1254,7 +1254,7 @@ async function rodarComFalsos(conversa: string, texto: string, forte: AIMessage[
 	return { estado, ...falsos };
 }
 servicos.buscarVoos = (async (origem: string, destino: string, data: string) => [{ ...voo, origem, destino, data }, { ...barata, origem, destino, data }]) as any;
-servicos.criarPlanilha = (async () => "https://planilha.falsa/1") as any;
+servicos.atualizarPlanilha = (async (planilha: string | null) => planilha ?? "https://planilha.falsa/1") as any;
 
 // "oi": o forte faz o plano vazio e escreve; o barato nem é chamado; o redator recebe a situação atual
 let rodada = await rodarComFalsos("falso-oi", "oi", [planoFalso(), new AIMessage("Oi! Nada rodando agora. Quer que eu procure algum voo?")], []);
@@ -1266,7 +1266,7 @@ rodada = await rodarComFalsos("falso-busca", "voos de GRU para REC em 12/12",
 	[planoFalso("pesquisador"), new AIMessage("Achei voos de GRU para Recife. Quer só os diretos?")],
 	[pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "12/12" }), new AIMessage("*Pronto!*")]);    // "Pronto!" também vale, sem refazer o plano
 assert.equal(rodada.estado.buscas.length, 1);
-assert.match(rodada.estado.messages.at(-1).text, /:bar_chart: Planilha: <https:\/\/planilha\.falsa\/1\|abrir os \d+ voos na planilha>/);
+assert.match(rodada.estado.messages.at(-1).text, /:bar_chart: Planilha: <https:\/\/planilha\.falsa\/1\|abrir os \d+ voos de São Paulo–Recife na planilha>/);
 assert.match(textoDa(rodada.forte.cartas[1]), /GRU→REC/);    // o redator viu o resultado da busca
 
 // "pronto" sem ter feito a tarefa não tira o especialista do plano: o código manda ele de volta, com um bilhete
@@ -1536,6 +1536,124 @@ rodada = await rodarComFalsos("falso-guia-preco-da-web", "qual a moeda da Argent
 	[pediu("buscar_na_web", { pergunta: "moeda da Argentina" }), new AIMessage("pronto")]);
 assert.match(textoDa(rodada.forte.cartas[2]), /R\$ 89 não veio de nenhuma ferramenta/);
 assert.equal(rodada.estado.messages.at(-1).text, "A moeda da Argentina é o peso argentino (fonte: viagem.exemplo).");
+
+// ---------- A PLANILHA POR PAR DE CIDADES ----------
+// a mesma viagem entre duas cidades fica numa planilha só, não importa o aeroporto nem o sentido
+assert.equal(cidadeDoAeroporto("VCP"), "sao paulo");    // no dado cru VCP é Campinas; a tabela à mão diz que é São Paulo
+assert.equal(cidadeDoAeroporto("LGA"), cidadeDoAeroporto("JFK"));
+assert.equal(parDeCidades("GRU", "GIG"), parDeCidades("CGH", "SDU"));
+assert.equal(parDeCidades("VCP", "GIG"), parDeCidades("SDU", "GRU"));    // a volta Rio→São Paulo cai no mesmo par
+assert.notEqual(parDeCidades("GRU", "GIG"), parDeCidades("GRU", "LIS"));
+assert.equal(parDeCidades("ZZZ", "GRU"), "ZZZ|sao paulo");    // aeroporto desconhecido não quebra: vira o próprio código
+
+// 300 voos em 3 trechos viram 100, e o mais barato, o mais rápido e o de melhor custo-benefício de cada trecho ficam
+const muitos: Voo[] = Array.from({ length: 300 }, (_, i) => ({
+	...voo, data: `2026-12-1${i % 3}`, companhia: `Cia ${i}`, preco: 1000 + ((i * 37) % 300) * 10,
+	duracao_min: 300 + ((i * 53) % 400), escalas: i % 7 === 0 ? 0 : 1 + (i % 2), link: `https://exemplo/${i}`,
+}));
+const cabem = voosQueCabem(muitos);
+assert.equal(cabem.ficam.length, LIMITE_DE_VOOS);
+assert.equal(cabem.fora, 200);
+for (const [, doTrecho] of Map.groupBy(muitos, (um) => um.data)) {
+	const menor = (nota: (um: Voo) => number) => Math.min(...doTrecho.map(nota));
+	assert.ok(cabem.ficam.some((um) => um.data === doTrecho[0].data && um.preco === menor((um) => um.preco)), "o mais barato do trecho ficou de fora");
+	assert.ok(cabem.ficam.some((um) => um.data === doTrecho[0].data && um.duracao_min === menor((um) => um.duracao_min)), "o mais rápido do trecho ficou de fora");
+	assert.ok(cabem.ficam.some((um) => um.data === doTrecho[0].data && precoEquivalente(um) === menor(precoEquivalente)), "o de melhor custo-benefício do trecho ficou de fora");
+}
+// os diretos (43 aqui) vêm antes do resto
+assert.equal(cabem.ficam.filter((um) => um.escalas === 0).length, muitos.filter((um) => um.escalas === 0).length);
+// abaixo do limite nada sai; e com mais trechos do que cabe, o mais barato de cada um ainda vem primeiro
+assert.equal(voosQueCabem(muitos.slice(0, 40)).fora, 0);
+const espalhados = muitos.map((um, i) => ({ ...um, destino: `D${String(i % 120).padStart(2, "0")}` }));
+const deCada = voosQueCabem(espalhados);
+assert.equal(deCada.ficam.length, 100);
+assert.equal(new Set(deCada.ficam.map((um) => um.destino + um.data)).size, 100);
+assert.deepEqual(deCada.garantidos, []);    // 360 trechos: nem o mais barato de cada um coube, e a planilha diz isso
+assert.match(String(abasDaPesquisa(espalhados).abas.at(-1)!.linhas[0][0]), /São trechos demais para caberem os três de cada um: o mais barato e o mais rápido e o de melhor custo-benefício de alguns trechos ficaram de fora/);
+// em cada trecho: o barato (1000, 20h), o rápido (2000, 1h) e o de custo-benefício (1100, 5h), três voos diferentes
+const quarenta = Array.from({ length: 40 }, (_, i) => [[1000, 1200], [2000, 60], [1100, 300]].map(([preco, duracao_min], j) => ({ ...voo, destino: `T${i}`, preco, duracao_min, escalas: 1, link: `https://exemplo/t${i}-${j}` }))).flat();
+assert.deepEqual(voosQueCabem(quarenta).garantidos, ["o mais barato", "o mais rápido"]);    // 40 trechos x 3 = 120: o custo-benefício é o primeiro a faltar
+// a planilha soma no máximo 100 voos em todas as abas, diz quantos ficaram de fora, e aba vazia não fica com a lista velha
+const daPesquisa = abasDaPesquisa(muitos);
+const deVoos = daPesquisa.abas.filter((aba) => aba.nome !== "Sobre esta planilha");
+assert.equal(deVoos.reduce((soma, aba) => soma + aba.linhas.length, 0), 100);
+assert.ok(daPesquisa.abas.every((aba) => aba.modo === "reescrever"));
+assert.match(String(daPesquisa.abas.at(-1)!.linhas[0][0]), /^100 voos nesta planilha e 200 ficaram de fora/);
+const semCaros = abasDaPesquisa([voo]);
+assert.deepEqual(semCaros.abas[1].linhas, [["nenhum voo aqui", "", "", "", "", "", "", "", "", "", "", ""]]);
+assert.match(String(semCaros.abas.at(-1)!.linhas[0][0]), /^Todos os 1 voos/);
+// o voo que já estava na planilha guarda a hora em que foi checado
+assert.equal(abasDaPesquisa([{ ...voo, checado: "01/12/2026 10:00 BRT" }]).abas[0].linhas[0][1], "01/12/2026 10:00 BRT");
+
+// no grafo: a primeira pesquisa do par cria, as seguintes (outros aeroportos, a volta) voltam na mesma planilha
+const pedidosDePlanilha: { planilha: string | null; abas: any[] }[] = [];
+const planilhaDeAntes = servicos.atualizarPlanilha;
+servicos.atualizarPlanilha = (async (planilha: string | null, _titulo: string, abas: any[]) => {
+	pedidosDePlanilha.push({ planilha, abas });
+	return planilha ?? `https://planilha.falsa/par-${pedidosDePlanilha.length}`;
+}) as any;
+const pesquisarNoPar = (conversa: string, origem: string, destino: string, data: string) => rodarComFalsos(conversa, `voos de ${origem} para ${destino} em ${data}`,
+	[planoFalso("pesquisador"), new AIMessage("Achei voos.")], [pediu("buscar_voos", { origem, destino, data }), new AIMessage("pronto")]);
+await pesquisarNoPar("falso-par", "GRU", "GIG", "12/12");
+await pesquisarNoPar("falso-par", "CGH", "SDU", "13/12");
+rodada = await pesquisarNoPar("falso-par", "SDU", "VCP", "20/12");
+assert.deepEqual(pedidosDePlanilha.map((pedido) => pedido.planilha), [null, "https://planilha.falsa/par-1", "https://planilha.falsa/par-1"]);
+assert.equal(pedidosDePlanilha[2].abas[0].linhas.length + pedidosDePlanilha[2].abas[1].linhas.filter((linha: unknown[]) => linha[0] !== "nenhum voo aqui").length, 6);    // os 3 trechos, 2 voos cada
+assert.match(rodada.estado.messages.at(-1).text, /:bar_chart: Planilha: <https:\/\/planilha\.falsa\/par-1\|abrir os 6 voos de Rio de Janeiro–São Paulo na planilha>/);    // no sentido desta pesquisa
+// outra conversa tem a sua planilha, mesmo no mesmo par
+await pesquisarNoPar("falso-par-outra", "GRU", "GIG", "12/12");
+assert.equal(pedidosDePlanilha.at(-1)!.planilha, null);
+// a planilha guardada sumiu do Drive: o bot tenta de novo uma vez (falha passageira não troca a planilha), cria outra e passa a usar ela
+servicos.atualizarPlanilha = (async (planilha: string | null, _titulo: string, abas: any[]) => {
+	pedidosDePlanilha.push({ planilha, abas });
+	if (planilha) throw new Error("o Google respondeu com erro 404");
+	return "https://planilha.falsa/par-nova";
+}) as any;
+await pesquisarNoPar("falso-par", "GIG", "CGH", "21/12");
+assert.deepEqual(pedidosDePlanilha.slice(-3).map((pedido) => pedido.planilha), ["https://planilha.falsa/par-1", "https://planilha.falsa/par-1", null]);
+// uma falha só, e a segunda tentativa dá certo: continua a mesma planilha
+let falhasDoGoogle = 1;
+servicos.atualizarPlanilha = (async (planilha: string | null, _titulo: string, abas: any[]) => {
+	pedidosDePlanilha.push({ planilha, abas });
+	if (planilha && falhasDoGoogle-- > 0) throw new Error("o Google respondeu com erro 500");
+	return planilha ?? "https://planilha.falsa/nao-devia";
+}) as any;
+await pesquisarNoPar("falso-par", "GRU", "SDU", "22/12");
+assert.deepEqual(pedidosDePlanilha.slice(-2).map((pedido) => pedido.planilha), ["https://planilha.falsa/par-nova", "https://planilha.falsa/par-nova"]);
+// o painel mostra o link de cada pedido, se a planilha é nova ou reaproveitada e quantos voos ficaram de fora
+const notasDaPlanilha = avisosDoPainel.filter((aviso) => aviso.conversa === "falso-par" && aviso.fase === "nota" && aviso.no === "planilha");
+assert.deepEqual(notasDaPlanilha.map((aviso) => aviso.detalhe), ["nova: São Paulo–Rio de Janeiro, 2 voos", "reaproveitada: São Paulo–Rio de Janeiro, 4 voos", "reaproveitada: Rio de Janeiro–São Paulo, 6 voos", "nova: Rio de Janeiro–São Paulo, 8 voos", "reaproveitada: São Paulo–Rio de Janeiro, 10 voos"]);
+assert.equal(notasDaPlanilha.at(-2)!.link, "https://planilha.falsa/par-nova");
+
+// o mesmo trecho pesquisado de novo troca os voos dele; voo de dia que já passou sai da planilha
+const buscaDeAntes = servicos.buscarVoos;
+const umaCompanhia = (companhia: string, quantos = 1) => (async (origem: string, destino: string, data: string) => Array.from({ length: quantos }, (_, i) => ({ ...voo, origem, destino, data, companhia, preco: 1000 + i, link: `https://voos.falsos/${companhia}-${i}` }))) as any;
+servicos.atualizarPlanilha = (async (planilha: string | null, _titulo: string, abas: any[]) => {
+	pedidosDePlanilha.push({ planilha, abas });
+	if (abas.some((aba) => aba.linhas.some((linha: unknown[]) => linha.includes("LIS")))) throw new Error("o Google respondeu com erro 500");
+	return planilha ?? `https://planilha.falsa/par-${pedidosDePlanilha.length}`;
+}) as any;
+guardarPlanilhaDoPar("falso-pares", parDeCidades("GRU", "GIG"), "https://planilha.falsa/velha", [{ ...voo, origem: "GRU", destino: "GIG", data: "2020-01-01", companhia: "Passou" }]);
+servicos.buscarVoos = umaCompanhia("Primeira");
+await pesquisarNoPar("falso-pares", "GRU", "GIG", "12/12");
+servicos.buscarVoos = umaCompanhia("Segunda");
+await pesquisarNoPar("falso-pares", "GRU", "GIG", "12/12");
+const companhiasNaPlanilha = (pedido: { abas: any[] }) => pedido.abas.filter((aba) => aba.nome !== "Sobre esta planilha").flatMap((aba) => aba.linhas.map((linha: unknown[]) => linha[3])).filter(Boolean);
+assert.deepEqual(companhiasNaPlanilha(pedidosDePlanilha.at(-2)!), ["Primeira"]);
+assert.deepEqual(companhiasNaPlanilha(pedidosDePlanilha.at(-1)!), ["Segunda"]);
+// uma pesquisa com dois pares: uma planilha por par. O par que falha guarda só os voos dele em "novos", para tentar de novo
+const doisPares = new AIMessage({ content: "", tool_calls: [{ id: "falso-pares-1", name: "buscar_voos", args: { origem: "GRU", destino: "SSA", data: "14/12" } }, { id: "falso-pares-2", name: "buscar_voos", args: { origem: "GRU", destino: "LIS", data: "14/12" } }] });
+rodada = await rodarComFalsos("falso-pares", "voos de GRU para SSA e para LIS em 14/12", [planoFalso("pesquisador"), new AIMessage("Achei voos.")], [doisPares, new AIMessage("pronto")]);
+assert.deepEqual(pedidosDePlanilha.slice(-2).map((pedido) => pedido.planilha), [null, null]);
+assert.match(rodada.estado.messages.at(-1).text, /:bar_chart: Planilha: <[^|]+\|abrir os 1 voos de São Paulo–Salvador na planilha>\nNão consegui criar a planilha de São Paulo–Lisboa agora/);
+assert.deepEqual(rodada.estado.novos.map((um: Voo) => um.destino), ["LIS"]);
+// busca de 150 voos: a planilha leva 100, e a pessoa e o painel ficam sabendo dos 50 que não couberam
+servicos.buscarVoos = umaCompanhia("Muitas", 150);
+rodada = await pesquisarNoPar("falso-pares", "GRU", "CNF", "15/12");
+assert.match(rodada.estado.messages.at(-1).text, /abrir os 100 voos de São Paulo–Belo Horizonte na planilha> \(50 não couberam\)/);
+assert.match(avisosDoPainel.filter((aviso) => aviso.conversa === "falso-pares" && aviso.no === "planilha").at(-1)!.detalhe, /^nova: São Paulo–Belo Horizonte, 100 voos, 50 ficaram de fora$/);
+servicos.buscarVoos = buscaDeAntes;
+servicos.atualizarPlanilha = planilhaDeAntes;
 
 // ---------- O PAINEL AO VIVO ----------
 // o ouvinte vê cada nó começar e terminar, na ordem em que o grafo roda, e cada chamada de modelo

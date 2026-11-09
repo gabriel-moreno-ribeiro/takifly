@@ -17,6 +17,8 @@
 //   verificar → aprovou → planilha → lembrar → END
 //             → recusou → volta para redator (até 2 vezes)
 //             → recusou de novo → emergencia → planilha → lembrar → END
+//   planilha: código. Uma planilha por par de cidades da conversa (GRU→GIG e SDU→VCP são a mesma), reescrita a cada
+//     pesquisa nova do par e com no máximo 100 voos; o link fica na tabela planilhas do dados.sqlite
 //   lembrar (agente de memória): com pista na mensagem ("moro", "prefiro") e sem o especialista memoria no pedido,
 //     o modelo barato propõe fatos que duram e fatosParaGuardar() decide o que entra nas preferências
 //
@@ -38,16 +40,17 @@ import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { ChatOpenAI } from "@langchain/openai";
 
 import { AGENTES, INSTRUCOES_DO_RESUMO, instrucoesDaMemoria, instrucoesDoOrquestrador, instrucoesDoRedator, Lembrete, type NomeDoAgente, Plano, planoValido } from "./agents.ts";
-import { apagarPreferencia, type Dossie, guardarPreferencia, lerDossie, listarMonitoramentos, listarPreferencias } from "../storage/database.ts";
+import { apagarPreferencia, type Dossie, guardarPlanilhaDoPar, guardarPreferencia, lerDossie, lerPlanilhaDoPar, listarMonitoramentos, listarPreferencias } from "../storage/database.ts";
 import { type Caderno, conferirNoRegistro, descreverMonitoramento, descreverVoo, LIMITE_DE_PREFERENCIAS, limparArgumentos, avisosDaBusca, servicos } from "./tools.ts";
-import { semAcento } from "../rules/airports.ts";
+import { cidadeDoAeroporto, nomeDaCidade, semAcento } from "../rules/airports.ts";
 import { conferirViagem, paisDoAeroporto, type Trecho, type Viagem } from "../rules/rules.ts";
 import { anotar, rastrear } from "./tracing.ts";
-import { ouvinteAoVivo } from "./live.ts";
+import { anotarNoPainel, ouvinteAoVivo } from "./live.ts";
 import { nomesDosModelos, rotuloDosModelos } from "./models.ts";
 import { arrumarParaSlack, escreveuChamada, prometeuSemFazer, RESPOSTA_QUE_NAO_SAIU, verificarResposta } from "./checker.ts";
 import { REGRA_DO_CUSTO_BENEFICIO, type Voo } from "../sources/flights.ts";
-import { horas } from "../sources/spreadsheet.ts";
+import { hojeEmSaoPaulo } from "../rules/dates.ts";
+import { abasDaPesquisa, horas } from "../sources/spreadsheet.ts";
 
 // ---------- CHAVES ----------
 // sem .env (worktree nova, CI), as chaves vêm do ambiente: os testes não precisam delas
@@ -225,12 +228,17 @@ const PEDIU_PARA_LEMBRAR = /\b(lembr|guard|anot|memoriz|esquec|apag)/;    // ped
 // saúde, religião e afins só são guardados quando a pessoa pede, pelo especialista memoria: nunca de passagem
 const ASSUNTO_SENSIVEL = /diabet|insulin|doen[cç]|remedio|medicament|gravid|gestante|deficien|cadeirante|mobilidade|autis|religi|igreja|judeu|judia|muculman|orientacao sexual|hiv|cancer|depress|ansiedade|alergi|vegan|vegetarian/;
 
+// a mensagem que vale mandar ao agente de memória: tem pista em primeira pessoa, não é pedido explícito (esse é do
+// especialista memoria) e não fala de assunto sensível. O compactar e o excluir (brain/context.ts) usam a mesma regra
+export function podeLembrar(mensagem: string) {
+	const normal = semAcento(mensagem).toLowerCase();
+	return FORMAS_DE_FATO.some(([, pista]) => pista.test(normal)) && !PEDIU_PARA_LEMBRAR.test(normal) && !ASSUNTO_SENSIVEL.test(normal);
+}
+
 export async function noLembrar(estado: typeof Estado.State, config: LangGraphRunnableConfig) {
 	if (estado.feitos.some((feito) => feito.startsWith("memoria:"))) return {};
 	const mensagem = estado.messages.findLast((mensagem) => mensagem.getType() === "human")?.text ?? "";
-	const normal = semAcento(mensagem).toLowerCase();
-	const temPista = FORMAS_DE_FATO.some(([, pista]) => pista.test(normal));
-	if (!temPista || PEDIU_PARA_LEMBRAR.test(normal) || ASSUNTO_SENSIVEL.test(normal)) return {};
+	if (!podeLembrar(mensagem)) return {};
 
 	const conversa = conversaDe(config);
 	const guardadas = listarPreferencias(conversa);
@@ -663,20 +671,65 @@ export function listarVoosParaPessoa(voos: Voo[]) {
 }
 
 // ---------- NÓ: PLANILHA ----------
-// quem cria a planilha é o código: assim ela nunca é esquecida, nunca é criada duas vezes e o link nunca é inventado
-async function noPlanilha(estado: typeof Estado.State) {
+// quem cria a planilha é o código: assim ela nunca é esquecida, nunca é criada duas vezes e o link nunca é inventado.
+// Uma planilha por par de cidades da conversa, sem ordem: GRU→GIG, CGH→SDU e a volta Rio→São Paulo caem na mesma.
+// A pesquisa seguinte do par junta os voos novos com os que estão lá (o trecho pesquisado de novo troca os dele)
+// e reescreve a planilha, que nunca passa de 100 voos (abasDaPesquisa, em sources/spreadsheet.ts).
+export function parDeCidades(origem: string, destino: string) {
+	return [cidadeDoAeroporto(origem), cidadeDoAeroporto(destino)].toSorted().join("|");
+}
+
+async function noPlanilha(estado: typeof Estado.State, config: LangGraphRunnableConfig) {
 	if (estado.novos.length === 0) return {};
+	const conversa = conversaDe(config);
 	const ultima = estado.messages.at(-1) as AIMessage;
-	const rotas = [...new Set(estado.novos.map((voo) => `${voo.origem}→${voo.destino}`))].join(", ");
-	try {
-		const link = await servicos.criarPlanilha("Takifly " + rotas, estado.novos);
-		// o começo ":bar_chart: Planilha:" fica: o quality/style-judge.ts reconhece esta linha por ele
-		return { messages: [new AIMessage({ id: ultima.id, content: `${ultima.text}\n\n:bar_chart: Planilha: <${link}|abrir os ${estado.novos.length} voos na planilha>` })], novos: [] };
-	} catch (erro: any) {
-		// os voos continuam em "novos": a próxima mensagem tenta criar a planilha de novo. O motivo técnico fica no log
-		console.log(`[planilha] não criei: ${erro.message}`);
-		return { messages: [new AIMessage({ id: ultima.id, content: `${ultima.text}\n\nNão consegui criar a planilha agora. Na sua próxima mensagem eu tento de novo.` })] };
+	const trecho = (voo: Voo) => `${voo.origem}|${voo.destino}|${voo.data}`;
+	const hoje = hojeEmSaoPaulo();
+	const linhas: string[] = [];
+	const naoForam: Voo[] = [];
+	for (const [par, novos] of Map.groupBy(estado.novos, (voo) => parDeCidades(voo.origem, voo.destino))) {
+		// o nome vai no sentido desta pesquisa: GRU→REC é "São Paulo–Recife", a volta é "Recife–São Paulo"
+		const nome = [novos[0].origem, novos[0].destino].map((iata) => nomeDaCidade(cidadeDoAeroporto(iata))).join("–");
+		let guardada: ReturnType<typeof lerPlanilhaDoPar> = null;
+		let link = "";
+		try {
+			guardada = lerPlanilhaDoPar(conversa, par);
+			// dos voos que já estavam lá saem os trechos pesquisados de novo (o preço novo vale) e os de dia que já passou
+			const pesquisados = new Set(novos.map(trecho));
+			const antigos = (guardada?.voos ?? []).filter((voo) => !pesquisados.has(trecho(voo)) && voo.data >= hoje);
+			const { abas, ficam, fora } = abasDaPesquisa([...antigos, ...novos]);
+			const mandar = (planilha: string | null) => servicos.atualizarPlanilha(planilha, "Takifly " + nome, abas);
+			let nova = !guardada;
+			// uma falha passageira do Google não pode trocar a planilha da pessoa: tenta de novo uma vez. Se falhar de novo,
+			// ela pode ter sido apagada do Drive, e sem uma nova o par ficaria sem planilha para sempre
+			link = await mandar(guardada?.link ?? null).catch(async (erro) => {
+				if (!guardada) throw erro;
+				console.log(`[planilha] não atualizei a de ${nome} (${erro.message}): tento de novo`);
+				return mandar(guardada.link).catch((deNovo) => {
+					console.log(`[planilha] não atualizei a de ${nome} de novo (${deNovo.message}): crio outra`);
+					nova = true;
+					return mandar(null);
+				});
+			});
+			try {
+				guardarPlanilhaDoPar(conversa, par, link, ficam);
+			} catch (erro: any) {
+				// a planilha existe: o link vai para a pessoa mesmo assim. A próxima pesquisa do par cria outra
+				console.log(`[planilha] não guardei o link da de ${nome}: ${erro.message}`);
+			}
+			const cortados = fora > 0 ? `, ${fora} ficaram de fora` : "";
+			anotarNoPainel(conversa, "planilha", `${nova ? "nova" : "reaproveitada"}: ${nome}, ${ficam.length} voos${cortados}`, { link });
+			// o começo ":bar_chart: Planilha:" fica: o quality/style-judge.ts reconhece esta linha por ele
+			linhas.push(`:bar_chart: Planilha: <${link}|abrir os ${ficam.length} voos de ${nome} na planilha>${fora > 0 ? ` (${fora} não couberam)` : ""}`);
+		} catch (erro: any) {
+			// os voos deste par continuam em "novos": a próxima mensagem tenta de novo. O motivo técnico fica no log
+			console.log(`[planilha] não criei a de ${nome}: ${erro.message}`);
+			anotarNoPainel(conversa, "planilha", `falhou: ${nome} (${erro.message})`);
+			naoForam.push(...novos);
+			linhas.push(`Não consegui ${guardada ? "atualizar" : "criar"} a planilha de ${nome} agora. Na sua próxima mensagem eu tento de novo.`);
+		}
 	}
+	return { messages: [new AIMessage({ id: ultima.id, content: `${ultima.text}\n\n${linhas.join("\n")}` })], novos: naoForam };
 }
 
 // ---------- ARESTAS CONDICIONAIS ----------
@@ -706,6 +759,18 @@ function depoisDeVerificar(estado: typeof Estado.State) {
 // ---------- GRAFO ----------
 // o SqliteSaver guarda a pasta num arquivo depois de cada nó: é a memória que sobrevive ao Ctrl+C
 const memoria = SqliteSaver.fromConnString(process.env.MEMORIA ?? import.meta.dirname + "/../data/memoria.sqlite");
+
+// as conversas que têm memória, da que mexeu por último à mais antiga, para o painel. Lê a tabela do SqliteSaver
+// direto: o list() dele abriria cada checkpoint guardado. O id do checkpoint cresce com o tempo (uuid6).
+// shortcut: depende do nome da tabela do @langchain/langgraph-checkpoint-sqlite 1.1; se ele mudar, a lista sai vazia (o teste avisa)
+export function listarConversas(): string[] {
+	try {
+		const linhas = (memoria as any).db.prepare("SELECT thread_id, MAX(checkpoint_id) AS ultimo FROM checkpoints WHERE checkpoint_ns = '' GROUP BY thread_id ORDER BY ultimo DESC").all();
+		return linhas.map((linha: { thread_id: string }) => linha.thread_id);
+	} catch {
+		return [];    // nenhum pedido rodou ainda: a tabela nem existe
+	}
+}
 
 const ESPECIALISTAS = ["memoria", "monitor", "pesquisador", "analista", "guia"] as const;
 const CAMINHOS_DO_ORQUESTRADOR = [...ESPECIALISTAS, "conferir", "situacao"] as const;

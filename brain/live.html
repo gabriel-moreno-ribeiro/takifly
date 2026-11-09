@@ -70,8 +70,26 @@
 	li.inicio .nome { color: #a1a1aa; }
 	li.modelo .nome::before { content: "◆ "; color: #a1a1aa; }
 	li.erro { background: #fef2f2; }
+	li.nota .nome { color: #b45309; }
 	li.novo-pedido { border-top: 2px solid #171717; }
 	.vazio { padding: 16px; color: #71717a; }
+	#contexto { margin-top: 20px; max-width: 1200px; }
+	#contexto h2 { font-size: 16px; margin: 0 0 8px; display: flex; gap: 10px; align-items: center; }
+	#contexto .colunas { display: grid; grid-template-columns: minmax(200px, 280px) 1fr; gap: 16px; align-items: start; }
+	@media (max-width: 800px) { #contexto .colunas { grid-template-columns: 1fr; } }
+	#conversas { list-style: none; margin: 0; padding: 0; border: 1px solid #e4e4e7; border-radius: 8px; font-size: 13px; }
+	#conversas li { display: block; padding: 0; }
+	#conversas button { all: unset; display: block; width: 100%; box-sizing: border-box; padding: 8px 10px; cursor: pointer; }
+	#conversas button:hover, #conversas button:focus-visible, #conversas li.escolhida button { background: rgba(37,99,235,.10); }
+	#conversas small { display: block; color: #b45309; }
+	#retrato { border: 1px solid #e4e4e7; border-radius: 8px; padding: 12px; font-size: 13px; }
+	#retrato dl { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; margin: 0 0 12px; }
+	#retrato dt { color: #71717a; }
+	#retrato dd { margin: 0; overflow-wrap: anywhere; }
+	.botoes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+	.botoes button, #contexto h2 button { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 6px; border: 1px solid #d4d4d8; background: #fff; color: inherit; cursor: pointer; }
+	.botoes button.perigo { border-color: #dc2626; color: #dc2626; }
+	.botoes button:disabled { opacity: .5; cursor: wait; }
 	@media (prefers-color-scheme: dark) {
 		body { background: #18181b; color: #f4f4f5; }
 		.no text { fill: #f4f4f5 !important; }
@@ -87,6 +105,8 @@
 		li .detalhe { color: #a1a1aa; }
 		li.erro { background: #450a0a; }
 		li.novo-pedido { border-top-color: #f4f4f5; }
+		#conversas, #retrato { border-color: #3f3f46; }
+		.botoes button, #contexto h2 button { background: #27272a; border-color: #3f3f46; }
 	}
 </style>
 </head>
@@ -175,7 +195,7 @@
 	<g class="no forte" data-no="redator"><rect x="290" y="678" width="180" height="48" rx="8"/><text x="380" y="698">redator</text><text class="det" x="380" y="716">escreve a resposta</text></g>
 	<g class="no codigo" data-no="verificar"><rect x="290" y="762" width="180" height="48" rx="8"/><text x="380" y="782">verificar</text><text class="det" x="380" y="800">nenhum preço inventado</text></g>
 	<g class="no codigo" data-no="emergencia"><rect x="70" y="852" width="160" height="48" rx="8"/><text x="150" y="872">emergencia</text><text class="det" x="150" y="890">o código responde</text></g>
-	<g class="no codigo" data-no="planilha"><rect x="290" y="852" width="180" height="48" rx="8"/><text x="380" y="872">planilha</text><text class="det" x="380" y="890">cria a planilha dos voos</text></g>
+	<g class="no codigo" data-no="planilha"><rect x="290" y="852" width="180" height="48" rx="8"/><text x="380" y="872">planilha</text><text class="det" x="380" y="890">uma por par de cidades, até 100</text></g>
 	<g class="no barato" data-no="lembrar"><rect x="250" y="932" width="260" height="48" rx="8"/><text x="380" y="952">lembrar</text><text class="det" x="380" y="970">guarda o que a pessoa contou</text></g>
 	<g class="no ponta" data-ponta="fim"><rect x="330" y="1004" width="100" height="32" rx="16"/><text x="380" y="1025">fim</text></g>
 </svg>
@@ -188,9 +208,18 @@
 	</div>
 	<ol id="linha"><li class="vazio">Mande uma mensagem para o bot no Slack: cada passo aparece aqui na hora.</li></ol>
 </main>
+<section id="contexto" aria-labelledby="titulo-contexto">
+	<h2 id="titulo-contexto">Conversas e o que o bot lembra <button id="atualizar" type="button">atualizar</button></h2>
+	<div class="colunas">
+		<ul id="conversas"><li class="vazio">carregando…</li></ul>
+		<div id="retrato"><span class="vazio">Escolha uma conversa para ver o que o bot lembra dela.</span></div>
+	</div>
+</section>
 <script>
 	// o que cada nó usa: serve para contar as chamadas de modelo de cada papel
 	const FORTES = new Set(["orquestrador", "redator"]);
+	// as notas de fora do grafo (fase "nota", brain/live.ts anotarNoPainel): o nome que aparece na lista
+	const NOTAS = { planilha: "planilha", espera: "esperando mais mensagens", juiz: "juiz das mensagens", cancelado: "pedido cancelado", contexto: "contexto" };
 	const todos = [];             // tudo o que chegou, de todas as conversas
 	const conversas = new Set();
 	let seguindo = "";           // conversa mostrada; vazio = a última que mexeu
@@ -300,13 +329,24 @@
 		linha.replaceChildren(...ultimos.map((a) => {
 			const li = document.createElement("li");
 			li.className = a.fase + (a.no === "preparar" && a.fase === "inicio" ? " novo-pedido" : "") + (chegouAgora && a === ultimos[0] ? " nova" : "");
-			const textos = [["hora", hora(a.hora)], ["nome", a.fase === "modelo" ? `${a.no} chamou o modelo ${a.detalhe}` : a.fase === "inicio" ? "pedido novo" : a.no + (a.levou != null ? ` · ${a.levou.toFixed(1).replace(".", ",")} s` : "")], ["detalhe", a.fase === "modelo" ? "" : a.detalhe]];
+			const nome = a.fase === "modelo" ? `${a.no} chamou o modelo ${a.detalhe}` : a.fase === "inicio" ? "pedido novo" : a.fase === "nota" ? NOTAS[a.no] ?? a.no : a.no + (a.levou != null ? ` · ${a.levou.toFixed(1).replace(".", ",")} s` : "");
+			const textos = [["hora", hora(a.hora)], ["nome", nome], ["detalhe", a.fase === "modelo" ? "" : a.detalhe]];
 			for (const [classe, texto] of textos) {
 				if (!texto) continue;
 				const s = document.createElement("span");
 				s.className = classe;
 				s.textContent = texto;
 				li.appendChild(s);
+			}
+			// só link https vira clicável: o texto do aviso nunca entra como HTML
+			if (/^https:\/\//.test(a.link ?? "")) {
+				const link = document.createElement("a");
+				link.className = "detalhe";
+				link.href = a.link;
+				link.target = "_blank";
+				link.rel = "noopener";
+				link.textContent = "abrir a planilha";
+				li.appendChild(link);
 			}
 			return li;
 		}));
@@ -320,6 +360,11 @@
 			const aviso = JSON.parse(mensagem.data);
 			todos.push(aviso);
 			if (todos.length > 2000) todos.splice(0, todos.length - 2000);
+			// alguém compactou ou excluiu: a lista de conversas avisa
+			if (aviso.fase === "nota" && aviso.no === "contexto") {
+				ultimaAcao.set(aviso.conversa, { texto: aviso.detalhe.split(":")[0], hora: aviso.hora });
+				carregarConversas();
+			}
 			// com dois canais ao mesmo tempo, "a última que mexeu" só troca quando um pedido novo começa
 			if (!ultima || (aviso.no === "preparar" && aviso.fase === "inicio")) ultima = aviso.conversa;
 			if (!conversas.has(aviso.conversa)) {
@@ -330,6 +375,93 @@
 			desenhar();
 		};
 	}
+	// ---------- as conversas e o contexto (brain/context.ts, pelas rotas /conversas de brain/live.ts) ----------
+	const ultimaAcao = new Map();    // conversa → o último compactar ou excluir, para avisar na lista
+	let escolhida = "";
+	const elemento = (tag, texto, classe) => { const el = document.createElement(tag); if (texto != null) el.textContent = texto; if (classe) el.className = classe; return el; };
+
+	async function carregarConversas() {
+		const lista = document.getElementById("conversas");
+		try {
+			const conversasGuardadas = await (await fetch("/conversas")).json();
+			if (!Array.isArray(conversasGuardadas) || conversasGuardadas.length === 0) return lista.replaceChildren(elemento("li", "nenhuma conversa ainda", "vazio"));
+			lista.replaceChildren(...conversasGuardadas.map((conversa) => {
+				const li = elemento("li", null, conversa === escolhida ? "escolhida" : "");
+				const botao = elemento("button", nomeCurto(conversa));
+				botao.type = "button";
+				botao.title = conversa;
+				botao.onclick = () => mostrarRetrato(conversa);
+				const acao = ultimaAcao.get(conversa);
+				if (acao) botao.appendChild(elemento("small", `${acao.texto} às ${hora(acao.hora)}`));
+				li.appendChild(botao);
+				return li;
+			}));
+		} catch {
+			lista.replaceChildren(elemento("li", "não consegui ler as conversas (o bot está ligado?)", "vazio"));
+		}
+	}
+
+	async function mostrarRetrato(conversa) {
+		escolhida = conversa;
+		carregarConversas();
+		const caixa = document.getElementById("retrato");
+		let r;
+		try {
+			r = await (await fetch("/conversas/" + encodeURIComponent(conversa))).json();
+		} catch {
+			return caixa.replaceChildren(elemento("span", "não consegui ler esta conversa", "vazio"));
+		}
+		const lista = (itens, vazio) => (itens && itens.length ? itens.join("; ") : vazio);
+		const d = r.dossie;
+		const documentos = d ? [`nacionalidade ${d.nacionalidade}`, d.passaporte_validade && `passaporte até ${d.passaporte_validade}`, d.nascimento && `nascimento ${d.nascimento}`, d.vacina_febre_amarela && `febre amarela ${d.vacina_febre_amarela}`].filter(Boolean) : [];
+		const dl = elemento("dl");
+		const linhas = [
+			["Conversa", r.conversa],
+			["Mensagens", `${r.naJanela} na janela${r.foraDaJanela ? `, ${r.foraDaJanela} já saíram (só pelo resumo)` : ""}${r.pedidoPelaMetade ? " · um pedido parou no meio" : ""}`],
+			["Resumo", r.resumo || "nenhum ainda"],
+			["Preferências", lista(r.preferencias, "nenhuma")],
+			["Documentos", lista(documentos, "nenhum")],
+			["Monitoramentos", lista(r.monitoramentos, "nenhum")],
+			["Voos (últimas 6 h)", String(r.voos ?? 0)],
+		];
+		for (const [rotulo, valor] of linhas) dl.append(elemento("dt", rotulo), elemento("dd", valor));
+		const planilhas = elemento("dd", (r.planilhas ?? []).length ? null : "nenhuma");
+		for (const p of r.planilhas ?? []) {
+			if (!/^https:\/\//.test(p.link)) continue;
+			const a = elemento("a", p.nome);
+			a.href = p.link; a.target = "_blank"; a.rel = "noopener";
+			planilhas.append(a, " ");
+		}
+		dl.append(elemento("dt", "Planilhas"), planilhas);
+		const botoes = elemento("div", null, "botoes");
+		const situacao = elemento("span", "", "estado");
+		situacao.setAttribute("role", "status");
+		for (const [qual, rotulo, classe] of [["compactar", "Compactar", ""], ["excluir", "Excluir", "perigo"]]) {
+			const botao = elemento("button", rotulo, classe);
+			botao.type = "button";
+			botao.onclick = () => agir(conversa, qual, botoes, situacao);
+			botoes.appendChild(botao);
+		}
+		botoes.appendChild(situacao);
+		caixa.replaceChildren(dl, botoes);
+	}
+
+	async function agir(conversa, qual, botoes, situacao) {
+		if (qual === "excluir" && !confirm("Excluir esta conversa? Apago as mensagens, o resumo e os voos. Preferências, documentos, monitoramentos e planilhas ficam.")) return;
+		for (const b of botoes.querySelectorAll("button")) b.disabled = true;
+		situacao.textContent = "trabalhando… (espera o pedido que estiver rodando terminar)";
+		try {
+			const corpo = await (await fetch(`/conversas/${encodeURIComponent(conversa)}/${qual}`, { method: "POST" })).json();
+			await mostrarRetrato(conversa);
+			document.querySelector("#retrato .botoes .estado").textContent = corpo.texto ?? corpo.erro ?? "";
+		} catch {
+			situacao.textContent = "não deu certo (o bot está ligado?)";
+			for (const b of botoes.querySelectorAll("button")) b.disabled = false;
+		}
+	}
+	document.getElementById("atualizar").onclick = carregarConversas;
+	carregarConversas();
+
 	document.getElementById("conversa").onchange = (evento) => { seguindo = evento.target.value; desenhar(); };
 	setInterval(() => { if (document.querySelector(".no.rodando")) desenhar(); }, 1000);    // o tempo do pedido anda
 	ouvir();

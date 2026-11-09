@@ -10,7 +10,7 @@ import { hojeEmSaoPaulo, somarDias } from "../rules/dates.ts";
 import { descreverAeroporto, nomesDoAeroporto, resolverAeroportos, semAcento } from "../rules/airports.ts";
 import { apagarPreferencia, cancelarMonitoramento, criarMonitoramento, type Dossie, guardarDossie, guardarPreferencia, listarMonitoramentos, listarPreferencias, type Monitoramento } from "../storage/database.ts";
 import { buscarHospedagem, conferirPedido as conferirPedidoDeHospedagem, resumirHospedagens } from "../sources/hotels.ts";
-import { criarPlanilha, horas } from "../sources/spreadsheet.ts";
+import { atualizarPlanilha, horas } from "../sources/spreadsheet.ts";
 import { buscarVoos, precoEquivalente, type Voo } from "../sources/flights.ts";
 import { pesquisarNaWeb, resumirAchados } from "../sources/web.ts";
 import { descreverClima, verClima } from "../sources/weather.ts";
@@ -18,7 +18,7 @@ import { regrasDeEntrada } from "../rules/rules.ts";
 
 // ---------- SERVIÇOS DE FORA ----------
 // o que sai do Mac fica neste objeto para a prova (exam.ts) poder trocar por versões de mentira
-export const servicos = { buscarVoos, buscarHospedagem, criarPlanilha, pesquisarNaWeb, verClima, esperar: (ms: number) => new Promise((pronto) => setTimeout(pronto, ms)) };
+export const servicos = { buscarVoos, buscarHospedagem, atualizarPlanilha, pesquisarNaWeb, verClima, esperar: (ms: number) => new Promise((pronto) => setTimeout(pronto, ms)) };
 
 // ---------- O AVISO DE PROGRESSO DA BUSCA ----------
 // o responder (graph.ts) guarda aqui, por conversa, a função que edita o aviso no Slack; a busca grande usa para a barra.

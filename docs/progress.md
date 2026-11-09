@@ -14,11 +14,11 @@ Trabalho sozinho, a pedido da pessoa, na branch `gabriel-moreno-ribeiro/madrugad
 
 ## Próximo passo
 
-F71 ativo: começar por `cidadeDoAeroporto` em `rules/airports.ts`, o corte de 100 voos em `sources/spreadsheet.ts`, a tabela `planilhas` em `storage/database.ts` e o `noPlanilha` em `brain/graph.ts`. Teste: bloco "A PLANILHA POR PAR DE CIDADES" em `quality/tests.ts`.
+F72 ativo. Já existem, sem commit: `brain/context.ts` (retrato, compactar, excluir), `brain/channel.ts` (fila do canal e os comandos `contexto`, `compactar contexto`, `excluir contexto`), `bot.ts` ligado ao `brain/channel.ts` com os botões, e as rotas `/conversas` em `brain/live.ts` e `brain/live.html`. Falta o bloco "VER, COMPACTAR E EXCLUIR O CONTEXTO" em `quality/tests.ts`, depois o revisor e o `verify-feature.ts F72`.
 
 ## O que ficou pronto
 
-(ainda nada)
+- F71: a mesma viagem entre duas cidades fica numa planilha só por conversa (GRU→GIG e SDU→VCP são a mesma), reescrita a cada pesquisa e com no máximo 100 voos. Commit "Planilha por par de cidades, com no máximo 100 voos (F71)".
 
 ## O que travou
 
@@ -26,7 +26,11 @@ F71 ativo: começar por `cidadeDoAeroporto` em `rules/airports.ts`, o corte de 1
 
 ## Decisões que tomei
 
-(a preencher)
+- F71, cidade do aeroporto: uso primeiro a tabela à mão `AJUSTES` de `rules/airports.ts` e só depois a cidade do OurAirports (`AEROPORTO`). Sem isso, VCP seria Campinas e não São Paulo, como o pedido exige. Não é tabela nova. Limite: fora da tabela à mão, aeroportos da mesma cidade podem cair em pares diferentes (Luton é "luton", não Londres) e os nomes saem sem acento ("Milao").
+- F71, voos guardados: o banco guarda, junto do link, os voos que estão na planilha (no máximo 100). A pesquisa seguinte junta os novos com esses, troca os do trecho pesquisado de novo e tira os de dia que já passou. Cada voo guarda a hora em que foi checado, para a planilha não dizer que um preço antigo é de agora.
+- F71, como dizer quantos ficaram de fora sem mudar o `.gs`: uma aba a mais, "Sobre esta planilha", com uma linha. Aba que ficaria vazia (por exemplo, nenhum voo caro) vai com a linha "nenhum voo aqui", porque o `.gs` pula aba vazia e a lista velha ficaria lá.
+- F71, Google falhando com planilha guardada: tenta de novo uma vez; se falhar de novo, cria outra planilha e passa a usar ela (a guardada pode ter sido apagada do Drive).
+- F71, o nome do par no Slack vai no sentido da pesquisa ("São Paulo–Recife"), e a planilha guarda o título da primeira pesquisa.
 
 # Estado verificado
 

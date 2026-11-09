@@ -225,6 +225,14 @@ Limite da Ollama Cloud que pesa aqui: ela não aplica JSON schema e ignora `tool
 formulário" é oferecer uma ferramenta só e pedir que o modelo a chame (`method: "functionCalling"`, com
 `retryPolicy`). Com o glm-5.3 isso acertou 4 de 4 em 03/11; com o glm-5.3-flash a prova ainda vai dizer.
 
+### Memória, planilha e mensagens seguidas (madrugada de 09/11)
+
+Pedido da pessoa para a madrugada de 08→09/11, feito sem crédito (tudo provado com `npm test` e modelos falsos).
+
+| Item | O que mudou | Onde |
+|---|---|---|
+| F71 | Uma planilha por par de cidades da conversa, sem ordem: GRU→GIG, CGH→SDU e a volta SDU→VCP são a mesma São Paulo–Rio. A cidade vem da tabela à mão de `rules/airports.ts` e, fora dela, do OurAirports. O link e os voos de cada (conversa, par) ficam na tabela `planilhas` do `dados.sqlite`; a pesquisa seguinte junta os voos novos com os de lá (o trecho pesquisado de novo troca os dele, e dia que passou sai) e reescreve a mesma planilha. Nunca passa de 100 voos: o mais barato, o mais rápido e o de melhor custo-benefício de cada trecho, depois os diretos, depois o resto; a aba "Sobre esta planilha" diz quantos ficaram de fora. Falha do Google tenta de novo uma vez, e só depois cria outra planilha. O painel mostra o link, se é nova ou reaproveitada e quantos foram cortados. O `spreadsheet.gs` não mudou | `noPlanilha` e `parDeCidades` em `brain/graph.ts`, `voosQueCabem` e `abasDaPesquisa` em `sources/spreadsheet.ts`, `cidadeDoAeroporto` em `rules/airports.ts`, `anotarNoPainel` em `brain/live.ts` |
+
 ## A interface no Slack
 
 O que a pessoa vê e não passa pelo modelo é código, e por isso muda de graça (só `npm test`):
