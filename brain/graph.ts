@@ -585,12 +585,15 @@ export function voosDestePedido(estado: typeof Estado.State) {
 	return estado.voos.filter((voo) => trechos.has(`${voo.origem}|${voo.destino}|${voo.data}`));
 }
 
-function noConferir(estado: typeof Estado.State, config: LangGraphRunnableConfig) {
+export function noConferir(estado: typeof Estado.State, config: LangGraphRunnableConfig) {
 	const conversa = conversaDe(config);
 	const regras = regrasDaViagem(voosDestePedido(estado), lerDossie(conversa));
 	// o convite para contar os documentos sai uma vez por conversa: nos 10 mil ele abria quase toda resposta,
 	// e foi o trecho que o juiz de escrita mais reclamou (tom de robô, fecho de efeito, enrolação)
-	const convite = regras?.recadoExtra && !estado.convidou ? regras.recadoExtra : "";
+	// a própria conversa conta também: em 09/11 o convite saiu de novo depois de dois pedidos cancelados, com o campo
+	// convidou falso. Uma resposta do bot que já falou da data de nascimento vale como convite feito
+	const jaConvidou = estado.convidou || estado.messages.some((mensagem) => mensagem.getType() === "ai" && /data de nascimento/i.test(mensagem.text));
+	const convite = regras?.recadoExtra && !jaConvidou ? regras.recadoExtra : "";
 	if (!regras || (regras.avisos.length === 0 && !convite)) return {};
 
 	console.log(`[regras] ${regras.avisos.map((aviso) => `${aviso.gravidade}:${aviso.regra}`).join(", ") || "só o recado extra"}`);
@@ -698,6 +701,7 @@ async function noPlanilha(estado: typeof Estado.State, config: LangGraphRunnable
 	const trecho = (voo: Voo) => `${voo.origem}|${voo.destino}|${voo.data}`;
 	const hoje = hojeEmSaoPaulo();
 	const linhas: string[] = [];
+	const feitas: { link: string; nome: string; voos: number; fora: number }[] = [];
 	const naoForam: Voo[] = [];
 	for (const [par, novos] of Map.groupBy(estado.novos, (voo) => parDeCidades(voo.origem, voo.destino))) {
 		// o nome vai no sentido desta pesquisa: GRU→REC é "São Paulo–Recife", a volta é "Recife–São Paulo"
@@ -731,8 +735,7 @@ async function noPlanilha(estado: typeof Estado.State, config: LangGraphRunnable
 			}
 			const cortados = fora > 0 ? `, ${fora} ficaram de fora` : "";
 			anotarNoPainel(conversa, "planilha", `${nova ? "nova" : "reaproveitada"}: ${nome}, ${ficam.length} voos${cortados}`, { link });
-			// o começo ":bar_chart: Planilha:" fica: o quality/style-judge.ts reconhece esta linha por ele
-			linhas.push(`:bar_chart: Planilha: <${link}|abrir os ${ficam.length} voos de ${nome} na planilha>${fora > 0 ? ` (${fora} não couberam)` : ""}`);
+			feitas.push({ link, nome, voos: ficam.length, fora });
 		} catch (erro: any) {
 			// os voos deste par continuam em "novos": a próxima mensagem tenta de novo. O motivo técnico fica no log
 			console.log(`[planilha] não criei a de ${nome}: ${erro.message}`);
@@ -741,6 +744,11 @@ async function noPlanilha(estado: typeof Estado.State, config: LangGraphRunnable
 			linhas.push(`Não consegui ${guardada ? "atualizar" : "criar"} a planilha de ${nome} agora. Na sua próxima mensagem eu tento de novo.`);
 		}
 	}
+	// o começo ":bar_chart: Planilha" fica: o quality/style-judge.ts reconhece esta linha por ele.
+	// Duas ou mais viram uma linha só (09/11): duas linhas iguais no fim da resposta pareciam repetição
+	const naoCouberam = (fora: number) => (fora > 0 ? ` (${fora} não couberam)` : "");
+	if (feitas.length === 1) linhas.unshift(`:bar_chart: Planilha: <${feitas[0].link}|abrir os ${feitas[0].voos} voos de ${feitas[0].nome} na planilha>${naoCouberam(feitas[0].fora)}`);
+	if (feitas.length > 1) linhas.unshift(`:bar_chart: Planilhas: ${feitas.map((feita) => `<${feita.link}|${feita.nome}, ${feita.voos} voos>${naoCouberam(feita.fora)}`).join(" · ")}`);
 	return { messages: [new AIMessage({ id: ultima.id, content: `${ultima.text}\n\n${linhas.join("\n")}` })], novos: naoForam };
 }
 
@@ -779,6 +787,11 @@ const memoria = SqliteSaver.fromConnString(process.env.MEMORIA ?? import.meta.di
 // um checkpoint novo e vazio deixaria a conversa toda no disco, lida pelo getStateHistory
 export async function apagarConversa(conversa: string) {
 	await memoria.deleteThread(conversa);
+}
+
+// os voos guardados da conversa (as últimas 6 horas de busca): o canal monta os cartões dos que a resposta citou
+export async function voosDaConversa(conversa: string): Promise<Voo[]> {
+	return (await grafo.getState({ configurable: { thread_id: conversa } })).values?.voos ?? [];
 }
 
 export function listarConversas(): string[] {

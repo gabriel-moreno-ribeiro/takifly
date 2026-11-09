@@ -94,7 +94,7 @@ ${Object.entries(REGRAS).map(([nome, texto]) => `- ${nome}: ${texto}`).join("\n"
 // a linha da planilha é o código que escreve (noPlanilha, no graph.ts), não o modelo: julgar ela mede o código.
 // Na primeira rodada, metade dos "pecas_de_dentro" eram essa linha.
 function soDoModelo(resposta: string) {
-	return resposta.split("\n").filter((linha) => !/^:bar_chart: Planilha:|^Não consegui (criar|atualizar) a planilha/.test(linha.trim())).join("\n").trim();
+	return resposta.split("\n").filter((linha) => !/^:bar_chart: Planilhas?:|^Não consegui (criar|atualizar) a planilha/.test(linha.trim())).join("\n").trim();
 }
 
 export async function julgar(mensagens: string[], resposta: string): Promise<Julgamento> {

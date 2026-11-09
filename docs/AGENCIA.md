@@ -248,7 +248,13 @@ O que a pessoa vê e não passa pelo modelo é código, e por isso muda de graç
 
 - **O mascote**: `assets/taki-icone.png` é o ícone do app (api.slack.com → Basic Information → Display Information) e `assets/taki-emoji.png` é o emoji `:taki:` do workspace, usado no aviso de progresso, no "Peguei" e no aviso de preço. Sem o emoji enviado ao Slack, aparece o texto `:taki:` cru.
 
-Precisam de configuração em api.slack.com: os botões "Compactar" e "Excluir" do `contexto` (F72) já existem e só funcionam com Interactivity ligada no app; botões de próximo passo e boas-vindas no primeiro contato (eventos `app_home_opened` e `member_joined_channel`) ainda não foram feitos.
+- **Cartões de voo** (09/11, `voosCitados`, `cartaoDoVoo` e `blocosDaResposta` em `brain/channel.ts`): cada voo que a resposta cita (o preço em R$ e a companhia no texto, até 3) vira um cartão montado pelo código com os voos guardados da conversa: preço, companhia, "dom, 15/11", horários, escalas, duração e o botão "Comprar". A linha "Comprar: <link>" do mesmo voo sai do texto; se o Slack recusar os blocos, vai a resposta inteira. O redator (regra 16) fica no essencial e deixa o detalhe para o cartão.
+- **Botões de próximo passo** (09/11): embaixo dos cartões, "Avisar se baixar", "Só diretos" e "Dia seguinte". Clicar mostra a frase no canal e vale como mandar ela (`frase` no canal, `app.action(/^frase_/)` no `bot.ts`).
+- **Boas-vindas e aba Home** (09/11, `BOAS_VINDAS` e `telaInicial`): a primeira vez que alguém abre a conversa com o bot (e não está no checkpointer), ele se apresenta com três exemplos em botões; a aba Home mostra o que o Takifly faz, os exemplos e os atalhos (`contexto`, `para`, `volte`).
+- **Datas e planilhas** (09/11): `arrumarParaSlack` troca "2026-12-12" e "15/11/2026" por "12/12" e "15/11" (fora de link), e o redator (regra 17) escreve "dom, 15/11". Duas ou mais planilhas viram uma linha só, ":bar_chart: Planilhas: ...".
+- **O convite para contar os documentos** sai uma vez por conversa: além do campo `convidou`, conta a própria conversa (uma resposta que já pediu a data de nascimento).
+
+Precisam de configuração em api.slack.com: **Interactivity** ligada (botões "Compactar" e "Excluir", "Comprar", próximos passos e exemplos); **App Home → Home Tab** ligada e **Event Subscriptions → bot event `app_home_opened`** (boas-vindas e aba Home). Sem isso, os botões aparecem mas não fazem nada, e as boas-vindas não saem.
 
 ## De onde vem cada dado real
 

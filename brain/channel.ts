@@ -13,11 +13,14 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { CRITERIOS_DO_JUIZ, Decisao, DECISOES_DO_JUIZ, INSTRUCOES_DO_JUIZ, PERGUNTA_DO_JUIZ } from "./agents.ts";
 import { explicarErro } from "./checker.ts";
 import { compactar, excluir, retratoDaConversa, retratoParaSlack } from "./context.ts";
-import { listarConversas, modelos, responder as responderDeVerdade } from "./graph.ts";
+import { listarConversas, modelos, responder as responderDeVerdade, voosDaConversa as voosDeVerdade } from "./graph.ts";
 import { anotarNoPainel } from "./live.ts";
 import { rotuloDosModelos } from "./models.ts";
 import { anotar, rastrear } from "./tracing.ts";
+import { diaDaSemana } from "./tools.ts";
 import { semAcento } from "../rules/airports.ts";
+import type { Voo } from "../sources/flights.ts";
+import { horas } from "../sources/spreadsheet.ts";
 
 // ---------- A SAÍDA ----------
 // dizer devolve o id da mensagem (o "ts" do Slack), para editar e apagar o aviso de progresso depois
@@ -84,6 +87,87 @@ export function emSecoes(texto: string) {
 
 export function comLinha(texto: string, blocos: unknown[] = emSecoes(texto)): Mensagem {
 	return { text: texto, blocks: [...blocos, { type: "divider" }] };
+}
+
+// ---------- OS CARTÕES DE VOO ----------
+// cada voo que a resposta cita vira um cartão embaixo dela, montado pelo código com os dados da busca (09/11):
+// o modelo escreve a conclusão, e dia, horários, escalas e o botão de comprar vêm daqui, sem chance de erro de cópia
+const MAX_CARTOES = 3;
+const reais = (valor: number) => `R$ ${valor.toLocaleString("pt-BR")}`;
+
+// os voos citados, na ordem em que aparecem: o preço em R$ e a companhia precisam estar no texto
+// shortcut: dois voos da mesma companhia e do mesmo preço viram o primeiro deles; se isso confundir, casar também o horário
+// "TAP Air Portugal + Lufthansa" é citada como "TAP": a primeira palavra basta, menos "Air", que é de várias companhias
+function nomeCurto(companhia: string) {
+	const palavras = semAcento(companhia.split(/\s*\+\s*/)[0]).split(/\s+/);
+	return palavras[0] === "air" ? palavras.slice(0, 2).join(" ") : palavras[0];
+}
+
+export function voosCitados(voos: Voo[], texto: string) {
+	const limpo = semAcento(texto);
+	const citados: Voo[] = [];
+	for (const achado of texto.matchAll(/R\$\s*(\d[\d.]*)/g)) {
+		const preco = Number(achado[1].replace(/\./g, ""));
+		const voo = voos.find((um) => um.preco === preco && limpo.includes(nomeCurto(um.companhia)) && !citados.includes(um));
+		if (voo) citados.push(voo);
+		if (citados.length === MAX_CARTOES) break;
+	}
+	return citados;
+}
+
+export function cartaoDoVoo(voo: Voo, indice: number) {
+	const dia = `${diaDaSemana(voo.data).slice(0, 3)}, ${voo.data.slice(8, 10)}/${voo.data.slice(5, 7)}`;
+	const escalas = voo.escalas === 0 ? "direto" : `${voo.escalas} escala${voo.escalas > 1 ? "s" : ""}`;
+	return {
+		type: "section",
+		text: { type: "mrkdwn", text: `*${reais(voo.preco)}* · ${voo.companhia}\n${dia} · ${voo.origem} ${voo.saida} → ${voo.destino} ${voo.chegada}\n${escalas} · ${horas(voo.duracao_min)}` },
+		accessory: { type: "button", action_id: `comprar_${indice}`, text: { type: "plain_text", text: "Comprar" }, url: voo.link },
+	};
+}
+
+// clicar num botão de frase vale como mandar a frase (bot.ts, app.action). Precisa da Interactivity ligada no app
+const PROXIMOS_PASSOS = [
+	["🔔 Avisar se baixar", "me avisa quando o preço desse voo baixar"],
+	["✈️ Só diretos", "mostra só os voos diretos"],
+	["📅 Dia seguinte", "e no dia seguinte?"],
+];
+const botoesDeFrase = (frases: string[][]) => ({
+	type: "actions",
+	elements: frases.map(([rotulo, frase], indice) => ({ type: "button", action_id: `frase_${indice}`, value: frase, text: { type: "plain_text", text: rotulo } })),
+});
+
+// a linha "Comprar: <link|ver no Google Voos>" sai do texto quando o cartão do mesmo voo já tem o botão
+export function blocosDaResposta(texto: string, voos: Voo[]) {
+	const semComprar = texto.split("\n").filter((linha) => !(/comprar/i.test(linha) && voos.some((voo) => linha.includes(voo.link)))).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+	return { texto: semComprar, blocos: [...emSecoes(semComprar), ...voos.map(cartaoDoVoo), botoesDeFrase(PROXIMOS_PASSOS)] };
+}
+
+// ---------- BOAS-VINDAS E A ABA HOME ----------
+// quem abre o Takifly pela primeira vez não sabe o que pedir: três exemplos, que também viram botões
+const EXEMPLOS = [
+	["✈️ Um voo", "voos de São Paulo para Lisboa em 12/12"],
+	["📅 O mais barato do mês", "o voo mais barato de Salvador para Portugal em dezembro"],
+	["🔔 Avisar quando baixar", "me avisa quando São Paulo–Recife em 20/12 baixar de R$ 600"],
+];
+const O_QUE_EU_FACO = "Eu procuro voos e hotéis de verdade no Google e te mostro o mais barato, o mais rápido e o melhor custo-benefício. Também acho o dia ou a cidade mais barata de um mês ou de um país, vigio um preço e te aviso quando ele cair, e respondo dúvidas de viagem: visto, clima, passaporte.";
+export const BOAS_VINDAS = {
+	text: ":taki: Oi! Eu sou o Takifly.",
+	blocks: [
+		{ type: "section", text: { type: "mrkdwn", text: `:taki: *Oi! Eu sou o Takifly.*\n${O_QUE_EU_FACO}\n\nMe escreve como você falaria com uma pessoa. Por exemplo:` } },
+		botoesDeFrase(EXEMPLOS),
+	],
+};
+export function telaInicial() {
+	return {
+		type: "home",
+		blocks: [
+			{ type: "header", text: { type: "plain_text", text: "Takifly" } },
+			{ type: "section", text: { type: "mrkdwn", text: O_QUE_EU_FACO } },
+			{ type: "divider" },
+			{ type: "section", text: { type: "mrkdwn", text: `*Experimente, na aba Mensagens:*\n${EXEMPLOS.map(([, frase]) => `• ${frase}`).join("\n")}` } },
+			{ type: "section", text: { type: "mrkdwn", text: "*Atalhos:* `contexto` mostra o que eu lembro da conversa · `para` interrompe uma busca · `volte` retoma a busca parada" } },
+		],
+	};
 }
 
 // ---------- OS CANAIS ----------
@@ -165,7 +249,7 @@ const perguntarAoJev: Jev = async (emAndamento, nova, sinal) => {
 	return lerRespostaDoJev(await resposta.json());
 };
 
-type Opcoes = { responder?: typeof responderDeVerdade; relogio?: Relogio; jev?: Jev };
+type Opcoes = { responder?: typeof responderDeVerdade; relogio?: Relogio; jev?: Jev; voosDaConversa?: (canal: string) => Promise<Voo[]> };
 
 const novoPedido = (textos: string[]): Pedido => ({ tipo: "pedido", textos, controle: new AbortController(), fase: "fila" });
 
@@ -173,6 +257,8 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 	const responder = opcoes.responder ?? responderDeVerdade;
 	const relogio = opcoes.relogio ?? relogioDeVerdade;
 	const jev = opcoes.jev ?? (process.env.TYPESAFE_API_KEY ? perguntarAoJev : null);
+	const voosDaConversa = opcoes.voosDaConversa ?? voosDeVerdade;
+	const recebidos = new Set<string>();    // quem já ganhou as boas-vindas desde que o bot ligou
 	const canais = new Map<string, EstadoDoCanal>();
 
 	const doCanal = (canal: string) => {
@@ -223,7 +309,16 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 			if (sinal.aborted) return;
 			tarefa.fase = "respondendo";
 			console.log("O bot respondeu: " + resposta);
-			await comLinhaOuTexto(canal, resposta);
+			// com voos citados, a resposta ganha os cartões e os botões. Se o Slack recusar os blocos, vai a resposta inteira, com o link
+			const voos = voosCitados(await voosDaConversa(canal).catch(() => []), resposta);
+			if (voos.length === 0) await comLinhaOuTexto(canal, resposta);
+			else {
+				const { texto, blocos } = blocosDaResposta(resposta, voos);
+				await saida.dizer(canal, comLinha(texto, blocos)).catch((erro) => {
+					console.log(`[canal] o Slack recusou os cartões (${erro?.message}): mando só o texto`);
+					return saida.dizer(canal, { text: resposta });
+				});
+			}
 		} catch (erro: any) {
 			if (sinal.aborted) return console.log(`[canal] pedido cancelado: ${tarefa.textos.join(" / ").slice(0, 100)}`);
 			console.log("Deu erro: ", erro);    // o erro técnico fica no log; a pessoa lê o que aconteceu e o que fazer
@@ -385,5 +480,19 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 		executar: (canal: string, qual: "compactar" | "excluir") => comando(canal, qual),
 	};
 
-	return { receber, botao, comando, vazio, acoesDoPainel };
+	// o botão de frase (próximo passo ou exemplo): a frase aparece no canal, para a resposta ter contexto, e segue
+	// como se a pessoa tivesse escrito
+	async function frase(canal: string, texto: string) {
+		await saida.dizer(canal, { text: `:point_right: _${texto}_` }).catch(console.log);
+		return receber(canal, texto);
+	}
+
+	// a primeira vez que a pessoa abre a conversa com o bot. Quem já conversou (está no checkpointer) não ganha de novo
+	async function boasVindas(canal: string) {
+		if (recebidos.has(canal) || listarConversas().includes(canal)) return;
+		recebidos.add(canal);
+		await saida.dizer(canal, BOAS_VINDAS).catch(console.log);
+	}
+
+	return { receber, botao, frase, boasVindas, comando, vazio, acoesDoPainel };
 }

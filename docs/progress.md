@@ -18,6 +18,7 @@ stale_after: 2026-11-11T00:00:00Z
 - **O juiz das mensagens seguidas agora chama o Jev** (TypeSafe, `POST https://api.typesafe.ai/v1/systemone`, pergunta `choice` com as quatro decisões), e não a Ollama, que era lenta. Precisa de `TYPESAFE_API_KEY` no `.env` da pasta principal; sem ela, continua na Ollama. Jev fora do ar vale fila.
 - **Jev ligado** (chave no `.env`): 5 de 5 certos em ~0,2 s cada, `jev-1.14.0`. No Slack, "pare" deu cancelar com 99%.
 - **"volte" retoma o pedido parado** por 30 min, e o `buscar_mais_barato` aceita "não importa a data" (era recusado no pedido de Salvador para Portugal).
+- **Interface no Slack (09/11)**: cartões de voo com botão "Comprar", botões de próximo passo, boas-vindas e aba Home, datas "dom, 15/11", planilhas numa linha e o convite dos documentos uma vez por conversa (detalhe em `docs/AGENCIA.md`, "A interface no Slack"). Precisa ligar no api.slack.com: Interactivity, Home Tab e o evento `app_home_opened`.
 - **Próximo passo (antigo)**: pôr a `TYPESAFE_API_KEY` no `.env`, reiniciar e mandar um "para" com um pedido rodando; depois, ver por que 3 calendários falharam (429 do Google?) e, se for o ritmo, aumentar a pausa ou tentar de novo uma vez. Se 2 min for demais para país grande, fazer os calendários em paralelo (com cuidado com o 429 do Google).
 
 # Madrugada 08→09/11

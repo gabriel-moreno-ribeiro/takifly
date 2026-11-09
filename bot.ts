@@ -10,7 +10,7 @@ import { App } from "@slack/bolt";
 
 // puxa do NOSSO arquivo brain/channel.ts (o "./" quer dizer "aqui nesta mesma pasta") o que o bot faz com cada
 // mensagem: a fila de cada canal e os comandos de contexto. Aqui fica só a ligação com o Slack
-import { comLinha, criarCanais } from "./brain/channel.ts";
+import { comLinha, criarCanais, telaInicial } from "./brain/channel.ts";
 import { ligarPainel } from "./brain/live.ts";
 
 // ---------- CHAVES ----------
@@ -71,6 +71,26 @@ for (const qual of ["compactar", "excluir"] as const) {
 		if (canal) await canais.botao(canal, qual);
 	});
 }
+
+// os botões embaixo de uma resposta com voos ("Só diretos", "Dia seguinte"...) e os exemplos das boas-vindas:
+// clicar vale como mandar a frase do botão
+app.action(/^frase_/, async ({ ack, body, action }) => {
+	await ack();
+	const canal = (body as any).channel?.id;
+	const frase = (action as any).value;
+	if (canal && frase) await canais.frase(canal, frase);
+});
+// "Comprar" é um link e o Slack abre sozinho, mas ele espera o ack para não mostrar um aviso de erro no botão
+app.action(/^comprar_/, async ({ ack }) => {
+	await ack();
+});
+
+// ---------- BOAS-VINDAS E A ABA HOME ----------
+// precisa, em api.slack.com: App Home → ligar a Home Tab; Event Subscriptions → bot event app_home_opened
+app.event("app_home_opened", async ({ event, client }) => {
+	if (event.tab === "home") await client.views.publish({ user_id: event.user, view: telaInicial() as any }).catch((erro) => console.log(`[home] não publiquei a aba Home: ${erro.message}`));
+	if (event.tab === "messages" && event.channel) await canais.boasVindas(event.channel);
+});
 
 // ---------- LIGAR ----------
 await app.start();
