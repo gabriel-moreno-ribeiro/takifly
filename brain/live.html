@@ -57,6 +57,8 @@
 	#grafo .seta.recusa.usada { stroke: #dc2626; }
 	#grafo .seta.usada.agora, #grafo .seta.agora { stroke: #f59e0b !important; stroke-width: 3; stroke-dasharray: 8 6; animation: correr .45s linear infinite; }
 	@keyframes correr { to { stroke-dashoffset: -14; } }
+	#faixa { font-size: 13px; font-weight: 600; fill: #b45309; }
+	#faixa.cancelado { fill: #dc2626; }
 	#bolinha { fill: #f59e0b; filter: drop-shadow(0 0 4px #f59e0b); }
 	#grafo .no.rodando rect { filter: drop-shadow(0 0 8px currentColor); }
 	li.nova { animation: chegou 1.2s ease-out; }
@@ -176,6 +178,8 @@
 
 	<!-- nós -->
 	<g class="no ponta" data-ponta="inicio"><rect x="330" y="12" width="100" height="36" rx="18"/><text x="380" y="35">início</text></g>
+	<!-- a faixa do que acontece antes do grafo: a espera por mais mensagens, a decisão do juiz, o pedido cancelado -->
+	<text id="faixa" x="444" y="35"></text>
 	<g class="no codigo" data-no="preparar"><rect x="290" y="72" width="180" height="46" rx="8"/><text x="380" y="92">preparar</text><text class="det" x="380" y="109">zera contadores, preço velho sai</text></g>
 	<g class="no barato" data-no="contexto"><rect x="250" y="142" width="260" height="48" rx="8"/><text x="380" y="162">contexto</text><text class="det" x="380" y="180">resume o que saiu da janela</text></g>
 	<g class="no forte" data-no="orquestrador"><rect x="270" y="218" width="220" height="64" rx="8"/><text x="380" y="242">orquestrador</text><text class="det" x="380" y="260">monta o plano, refaz até 2x</text></g>
@@ -245,6 +249,7 @@
 	bolinha.style.display = "none";    // só aparece quando há um passo correndo
 	grafo.appendChild(bolinha);
 	let passoAnimado = null;
+	let esperando = false;    // uma espera por mais mensagens está contando: a página redesenha a cada segundo
 	let avisosDesenhados = 0;
 
 	// a bolinha corre pela seta do passo de agora, no sentido em que o grafo andou
@@ -287,6 +292,9 @@
 			if (a.fase === "erro") { rodando.delete(a.no); erro.add(a.no); }
 			if (a.fase === "modelo") FORTES.has(a.no) ? fortes++ : baratos++;
 		}
+		// cancelado (brain/channel.ts): o pedido para onde estava, e nada mais corre no desenho
+		const cancelado = pedido.some((a) => a.fase === "nota" && a.no === "cancelado");
+		if (cancelado) rodando.clear();
 		grafo.classList.toggle("ativo", pedido.length > 0);
 		for (const [nome, g] of nos) {
 			g.classList.toggle("rodando", rodando.has(nome));
@@ -295,7 +303,7 @@
 			g.querySelector(".vezes").textContent = (vezes.get(nome) ?? 0) > 1 ? "×" + vezes.get(nome) : "";
 		}
 		const acabou = pedido.some((a) => a.no === "lembrar" && a.fase === "fim");
-		const terminou = acabou || pedido.at(-1)?.fase === "erro";
+		const terminou = acabou || cancelado || pedido.at(-1)?.fase === "erro";
 		// os caminhos percorridos: de cada nó que começou para o próximo. O último é o passo de agora
 		const usadas = new Set();
 		let anterior = "inicio", passo = "";
@@ -308,6 +316,18 @@
 			el.classList.toggle("agora", el.tagName === "path" && dela.includes(passo));
 		}
 		pontas.inicio.classList.toggle("feito", pedido.length > 0);
+		// a faixa ao lado do início. A espera conta enquanto o "ate" da última nota de espera não passou, com pedido rodando
+		// ou não; senão, a decisão do juiz até o fim do pedido, ou o "pedido cancelado" até o próximo pedido começar
+		const ultimaEspera = daConversa.findLast((a) => a.fase === "nota" && a.no === "espera");
+		const falta = ultimaEspera?.ate ? Math.ceil((new Date(ultimaEspera.ate) - new Date()) / 1000) : 0;
+		esperando = falta > 0;
+		const fimDoUltimo = daConversa.findLastIndex((a) => a.no === "lembrar" && a.fase === "fim");
+		const comecoDoUltimo = daConversa.findLastIndex((a) => a.no === "preparar" && a.fase === "inicio");
+		const juiz = daConversa.findLastIndex((a, i) => i > fimDoUltimo && a.fase === "nota" && a.no === "juiz");
+		const cancelou = daConversa.findLastIndex((a, i) => i > comecoDoUltimo && a.fase === "nota" && a.no === "cancelado");
+		const faixa = document.getElementById("faixa");
+		faixa.textContent = esperando ? `⏳ esperando mais mensagens (${falta}s)` : cancelou > juiz ? "✖ pedido cancelado" : juiz >= 0 ? `⚖️ juiz: ${daConversa[juiz].detalhe}`.slice(0, 60) : "";
+		faixa.classList.toggle("cancelado", !esperando && cancelou > juiz);
 		pontas.fim.classList.toggle("feito", acabou);
 		animar(passo);
 		const segundos = pedido.length ? Math.round(((terminou ? new Date(pedido.at(-1).hora) : new Date()) - new Date(pedido[0].hora)) / 1000) : 0;
@@ -449,7 +469,7 @@
 	async function agir(conversa, qual, botoes, situacao) {
 		if (qual === "excluir" && !confirm("Excluir esta conversa? Apago as mensagens, o resumo e os voos. Preferências, documentos, monitoramentos e planilhas ficam.")) return;
 		for (const b of botoes.querySelectorAll("button")) b.disabled = true;
-		situacao.textContent = "trabalhando… (espera o pedido que estiver rodando terminar)";
+		situacao.textContent = qual === "excluir" ? "trabalhando… (o pedido que estiver rodando é cancelado)" : "trabalhando… (espera o pedido que estiver rodando terminar)";
 		try {
 			const corpo = await (await fetch(`/conversas/${encodeURIComponent(conversa)}/${qual}`, { method: "POST" })).json();
 			// a pessoa pode ter clicado em outra conversa enquanto esperava: a frase só aparece na conversa certa
@@ -465,7 +485,7 @@
 	carregarConversas();
 
 	document.getElementById("conversa").onchange = (evento) => { seguindo = evento.target.value; desenhar(); };
-	setInterval(() => { if (document.querySelector(".no.rodando")) desenhar(); }, 1000);    // o tempo do pedido anda
+	setInterval(() => { if (esperando || document.querySelector(".no.rodando")) desenhar(); }, 1000);    // o tempo do pedido e a espera andam
 	ouvir();
 </script>
 </body>

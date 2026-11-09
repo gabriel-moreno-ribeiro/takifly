@@ -246,6 +246,7 @@ export async function noLembrar(estado: typeof Estado.State, config: LangGraphRu
 		const memoria = modelos.especialista.withStructuredOutput(Lembrete, { name: "lembrar", method: "functionCalling" });
 		const proposta = await memoria.invoke([new SystemMessage(instrucoesDaMemoria(guardadas.map((preferencia) => preferencia.texto))), new HumanMessage(mensagem)]);
 		const { novos, velhos } = fatosParaGuardar(proposta, guardadas, mensagem);
+		if (config.signal?.aborted) return {};    // o pedido foi cancelado enquanto o modelo pensava: ele some, e o que ele contou também
 		for (const velho of velhos) apagarPreferencia(conversa, velho.id);
 		for (const fato of novos) guardarPreferencia(conversa, fato);
 		if (novos.length > 0) console.log(`[lembrar] guardou: ${novos.join("; ")}${velhos.length > 0 ? ` (no lugar de: ${velhos.map((velho) => velho.texto).join("; ")})` : ""}`);
@@ -466,11 +467,14 @@ export async function noFerramentas(estado: typeof Estado.State, config?: LangGr
 		textosDoUsuario: textosDoUsuario(estado.messages),
 		preferencias: preferenciasDe(config),
 		conversa: conversaDe(config),
+		sinal: config?.signal,
 	};
 	const usadas = chamadasDoPedido(estado.messages.slice(0, -1));
 	const respostas = [];
 
 	for (const chamada of ultima.tool_calls ?? []) {
+		// pedido cancelado: nenhuma ferramenta nova roda (nem busca, nem gravação no banco)
+		config?.signal?.throwIfAborted();
 		let resultado: string;
 		try {
 			// o registro confere se a ferramenta é deste agente, se está ligada e se ainda cabe no limite do pedido
@@ -479,6 +483,7 @@ export async function noFerramentas(estado: typeof Estado.State, config?: LangGr
 			// aqui o zod confere os argumentos; se estiverem errados, o erro volta para o modelo corrigir
 			resultado = await ferramenta.invoke(limparArgumentos(chamada.args), { configurable: { caderno } });
 		} catch (erro: any) {
+			if (config?.signal?.aborted) throw erro;
 			// o erro volta para o modelo como texto: assim ele pode explicar ou tentar de outro jeito
 			resultado = "Erro: " + erro.message;
 		}
@@ -852,10 +857,12 @@ export function descreverPasso(no: string, resultado: any) {
 
 // stream roda o grafo igual ao invoke, mas entrega o resultado de cada nó assim que ele termina.
 // recursionLimit: o freio de mão do LangGraph, bem acima dos nossos limites; só dispara se um limite nosso falhar.
-async function rodar(entrada: { messages: BaseMessage[] } | null, config: { configurable: { thread_id: string } }, avisar: Avisar) {
+// sinal: quem chamou pode cancelar o pedido (brain/channel.ts, quando a pessoa muda o pedido no meio). O LangGraph
+// para entre um nó e outro e passa o sinal para a chamada de modelo que estiver em andamento.
+async function rodar(entrada: { messages: BaseMessage[] } | null, config: { configurable: { thread_id: string } }, avisar: Avisar, sinal?: AbortSignal) {
 	// o Langfuse guarda o rastro; o ouvinte do painel ao vivo (brain/live.ts) mostra cada nó na hora
 	const callbacks = [...rastrear(config.configurable.thread_id, rotuloDosModelos()), ouvinteAoVivo(config.configurable.thread_id)];
-	for await (const passo of await grafo.stream(entrada, { ...config, streamMode: "updates", recursionLimit: 60, callbacks })) {
+	for await (const passo of await grafo.stream(entrada, { ...config, streamMode: "updates", recursionLimit: 60, callbacks, signal: sinal })) {
 		// cada passo traz o resultado de um nó: conta o que vem depois dele, e o que cada ferramenta pedida vai fazer
 		for (const [no, resultado] of Object.entries(passo) as [string, any][]) {
 			const frase = descreverPasso(no, resultado);
@@ -867,28 +874,67 @@ async function rodar(entrada: { messages: BaseMessage[] } | null, config: { conf
 	return estado.values.messages.at(-1)?.text as string;
 }
 
-// conversa: o identificador da conversa (no Slack, o canal). Cada um tem a sua pasta separada no arquivo.
-export async function responder(conversa: string, texto: string, avisar: Avisar = () => {}): Promise<string> {
-	const config = { configurable: { thread_id: conversa } };
-	// a busca grande desenha a barra de progresso por aqui. O próximo pedido da conversa troca pela função nova
-	avisosDaBusca.set(conversa, avisar);
+// ---------- O PEDIDO CANCELADO ----------
+// O stream parado deixa no checkpointer o pedido pela metade, com o próximo nó marcado: sem isto, a mensagem seguinte
+// retomaria o pedido cancelado (o caminho do F69) e as mensagens dele ficariam na conversa. Aqui o pedido some como
+// se não tivesse existido: saem as mensagens que ele trouxe, voos e resumo voltam ao que eram, e o grafo fica parado
+// no fim ("lembrar"), sem nada para retomar.
+async function desfazerPedido(config: { configurable: { thread_id: string } }, antes: Awaited<ReturnType<typeof grafo.getState>>) {
+	const agora = await grafo.getState(config);
+	const eram = new Set<string | undefined>((antes.values.messages ?? []).map((mensagem: BaseMessage) => mensagem.id));
+	const vieram: BaseMessage[] = (agora.values.messages ?? []).filter((mensagem: BaseMessage) => !eram.has(mensagem.id));
+	await grafo.updateState(config, {
+		messages: vieram.map((mensagem) => new RemoveMessage({ id: mensagem.id! })),
+		voos: antes.values.voos ?? [],
+		novos: antes.values.novos ?? [],
+		pesquisadoEm: antes.values.pesquisadoEm ?? 0,
+		resumo: antes.values.resumo ?? "",
+		resumoAte: antes.values.resumoAte ?? 0,
+	}, "lembrar");
+}
 
-	// se o bot caiu no meio de um pedido, primeiro terminamos esse pedido de onde ele parou,
-	// e a resposta dele vai junto (ela pode trazer o link de uma planilha)
-	let respostaAtrasada = "";
+// conversa: o identificador da conversa (no Slack, o canal). Cada um tem a sua pasta separada no arquivo.
+// sinal: cancelado, o pedido para, é desfeito no checkpointer e o erro sobe; quem chamou não manda resposta nenhuma.
+export async function responder(conversa: string, texto: string, avisar: Avisar = () => {}, sinal?: AbortSignal): Promise<string> {
+	sinal?.throwIfAborted();
+	const config = { configurable: { thread_id: conversa } };
+	// a busca grande desenha a barra de progresso por aqui. O próximo pedido da conversa troca pela função nova.
+	// Cancelado, o pedido não mexe mais no aviso de progresso
+	const avisarSeVale: Avisar = (progresso) => (sinal?.aborted ? undefined : avisar(progresso));
+	avisosDaBusca.set(conversa, avisarSeVale);
+
 	const anterior = await grafo.getState(config);
 	try {
-		if (anterior.next.length > 0) respostaAtrasada = (await rodar(null, config, avisar)) + "\n\n";
-	} catch (erro: any) {
-		// uma retomada que quebra sempre prenderia o canal: a mensagem nova começa do zero e descarta o pedido antigo
-		console.log(`[responder] não retomei o pedido anterior: ${erro.message}`);
-		anotar(conversa, "retomada_falhou", false, erro.message);
-		// o explicarErro prometeu "continuo de onde parei": sem este aviso, o pedido antigo sumia em silêncio
-		respostaAtrasada = "Não consegui terminar o pedido anterior; se ainda precisar dele, mande de novo.\n\n";
-	}
+		// se o bot caiu no meio de um pedido, primeiro terminamos esse pedido de onde ele parou,
+		// e a resposta dele vai junto (ela pode trazer o link de uma planilha)
+		let respostaAtrasada = "";
+		try {
+			if (anterior.next.length > 0) respostaAtrasada = (await rodar(null, config, avisarSeVale, sinal)) + "\n\n";
+		} catch (erro: any) {
+			if (sinal?.aborted) throw erro;
+			// uma retomada que quebra sempre prenderia o canal: a mensagem nova começa do zero e descarta o pedido antigo
+			console.log(`[responder] não retomei o pedido anterior: ${erro.message}`);
+			anotar(conversa, "retomada_falhou", false, erro.message);
+			// o explicarErro prometeu "continuo de onde parei": sem este aviso, o pedido antigo sumia em silêncio
+			respostaAtrasada = "Não consegui terminar o pedido anterior; se ainda precisar dele, mande de novo.\n\n";
+		}
 
-	const resposta = await rodar({ messages: [new HumanMessage(texto)] }, config, avisar);
-	return respostaAtrasada + (resposta || RESPOSTA_QUE_NAO_SAIU);
+		const resposta = await rodar({ messages: [new HumanMessage(texto)] }, config, avisarSeVale, sinal);
+		sinal?.throwIfAborted();    // cancelado logo depois do último nó: a resposta pronta também não vale
+		return respostaAtrasada + (resposta || RESPOSTA_QUE_NAO_SAIU);
+	} catch (erro) {
+		if (sinal?.aborted) {
+			try {
+				await desfazerPedido(config, anterior);
+				console.log(`[responder] pedido cancelado e desfeito: ${texto.slice(0, 80)}`);
+			} catch (falha: any) {
+				// sem o desfazer, a próxima mensagem retomaria o pedido cancelado: fica no log e no Langfuse
+				console.log(`[responder] o pedido foi cancelado, mas não consegui desfazer ele: ${falha.message}`);
+				anotar(conversa, "desfazer_falhou", false, falha.message);
+			}
+		}
+		throw erro;
+	}
 }
 
 // ---------- USO PELO TERMINAL ----------

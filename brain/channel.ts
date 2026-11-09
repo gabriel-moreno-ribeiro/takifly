@@ -1,15 +1,22 @@
 // brain/channel.ts - o que o bot faz com as mensagens de cada canal, sem saber que é o Slack
 //
 // O bot.ts só liga isto ao Slack (dizer, editar e apagar mensagem, e os botões). Aqui mora a ordem das coisas:
+//   - mensagens seguidas esperam 5 s de silêncio e viram um pedido só; com um pedido rodando, um juiz decide se a
+//     mensagem nova refaz o pedido, espera na fila ou não pede nada (veja OS CANAIS, abaixo);
 //   - um trabalho por vez em cada canal (um pedido para o grafo, ou compactar e excluir o contexto): dois ao mesmo
 //     tempo escreveriam no mesmo checkpoint e um apagaria o que o outro escreveu;
 //   - "contexto", "compactar contexto" e "excluir contexto", exatos, viram a ação e não vão para o grafo.
 // Este arquivo não lê o .env: o quality/tests.ts importa ele com uma saída falsa no lugar do Slack.
 
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+
+import { Decisao, INSTRUCOES_DO_JUIZ } from "./agents.ts";
 import { explicarErro } from "./checker.ts";
 import { compactar, excluir, retratoDaConversa, retratoParaSlack } from "./context.ts";
-import { listarConversas, responder as responderDeVerdade } from "./graph.ts";
+import { listarConversas, modelos, responder as responderDeVerdade } from "./graph.ts";
 import { anotarNoPainel } from "./live.ts";
+import { rotuloDosModelos } from "./models.ts";
+import { anotar, rastrear } from "./tracing.ts";
 import { semAcento } from "../rules/airports.ts";
 
 // ---------- A SAÍDA ----------
@@ -61,27 +68,61 @@ export function blocosDoContexto(texto: string) {
 }
 
 // ---------- OS CANAIS ----------
-type Tarefa =
-	| { tipo: "pedido"; textos: string[] }
-	| { tipo: "comando"; comando: "compactar" | "excluir"; terminou: (texto: string) => void };
+// Várias mensagens seguidas viram um pedido só. Cada mensagem zera um cronômetro de ESPERA_POR_MAIS; quando ele vence,
+// as mensagens juntas (uma por linha) são o lote. Se nenhum pedido do canal está rodando, o lote vira um pedido.
+// Se um está, o juiz (o modelo barato, com prazo curto) lê o pedido e o lote e escolhe:
+//   refazer: o lote muda ou completa o pedido. O pedido é cancelado de verdade (AbortSignal até o grafo.stream, e o
+//     responder desfaz ele no checkpointer) e um novo começa com as mensagens dele e as do lote;
+//   fila: outro assunto. O pedido termina e o lote vem depois, com o "Peguei";
+//   ignorar_espera: "ok", "valeu". Nada muda.
+// Juiz que quebra ou demora vale fila: é o que o bot fazia antes, e nunca perde mensagem.
+export const ESPERA_POR_MAIS = 5_000;    // quanto silêncio fecha um lote de mensagens
+export const PRAZO_DO_JUIZ = 8_000;      // depois disso, sem decisão do juiz, vale fila
+export const REFAZENDO = ":taki: Vi que você mudou o pedido. Refaço com a mensagem nova junto.";
 
-type EstadoDoCanal = { fila: Tarefa[]; trabalhando: boolean; trabalho: Promise<void> };
+// fase: na fila, rodando (dá para cancelar), respondendo (a resposta já saiu do grafo: tarde para refazer) ou feito
+type Pedido = { tipo: "pedido"; textos: string[]; controle: AbortController; fase: "fila" | "rodando" | "respondendo" | "feito" };
+type Tarefa = Pedido | { tipo: "comando"; comando: "compactar" | "excluir"; terminou: (texto: string) => void };
 
-type Opcoes = { responder?: typeof responderDeVerdade };
+type EstadoDoCanal = {
+	fila: Tarefa[];
+	trabalhando: boolean;
+	trabalho: Promise<void>;
+	atual: Pedido | null;                    // o pedido que está rodando agora
+	chegando: string[];                      // as mensagens do lote que ainda está esperando o cronômetro
+	pararCronometro: (() => void) | null;
+	decidindo: Promise<void>;                // um lote decide de cada vez: dois juízes ao mesmo tempo poderiam cancelar o mesmo pedido
+};
+
+// o relógio que o teste troca: assim ele não espera 5 s de verdade
+export type Relogio = { depois(ms: number, fazer: () => void): () => void };
+const relogioDeVerdade: Relogio = {
+	depois(ms, fazer) {
+		const cronometro = setTimeout(fazer, ms);
+		return () => clearTimeout(cronometro);
+	},
+};
+
+type Opcoes = { responder?: typeof responderDeVerdade; relogio?: Relogio };
+
+const novoPedido = (textos: string[]): Pedido => ({ tipo: "pedido", textos, controle: new AbortController(), fase: "fila" });
 
 export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 	const responder = opcoes.responder ?? responderDeVerdade;
+	const relogio = opcoes.relogio ?? relogioDeVerdade;
 	const canais = new Map<string, EstadoDoCanal>();
 
 	const doCanal = (canal: string) => {
-		if (!canais.has(canal)) canais.set(canal, { fila: [], trabalhando: false, trabalho: Promise.resolve() });
+		if (!canais.has(canal)) canais.set(canal, { fila: [], trabalhando: false, trabalho: Promise.resolve(), atual: null, chegando: [], pararCronometro: null, decidindo: Promise.resolve() });
 		return canais.get(canal)!;
 	};
+	const dizer = (canal: string, text: string) => saida.dizer(canal, { text }).catch(console.log);
 
 	// trabalhando vira falso no mesmo instante em que a fila fica vazia: assim uma tarefa que chega logo depois nunca fica parada
-	function enfileirar(canal: string, tarefa: Tarefa) {
+	function enfileirar(canal: string, tarefa: Tarefa, naFrente = false) {
 		const estado = doCanal(canal);
-		estado.fila.push(tarefa);
+		if (naFrente) estado.fila.unshift(tarefa);
+		else estado.fila.push(tarefa);
 		if (estado.trabalhando) return;
 		estado.trabalhando = true;
 		estado.trabalho = (async () => {
@@ -90,20 +131,38 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 		})();
 	}
 
+	// o pedido rodando é cancelado: o responder desfaz ele no checkpointer, e o fazer() não manda a resposta velha
+	function cancelar(canal: string, motivo: string) {
+		const atual = doCanal(canal).atual;
+		if (!atual || atual.fase !== "rodando" || atual.controle.signal.aborted) return;
+		atual.controle.abort();
+		anotarNoPainel(canal, "cancelado", `pedido cancelado: ${motivo}`);
+	}
+
 	async function fazer(canal: string, tarefa: Tarefa) {
 		if (tarefa.tipo === "comando") return tarefa.terminou(await fazerComando(canal, tarefa.comando));
+		const estado = doCanal(canal);
+		const sinal = tarefa.controle.signal;
+		estado.atual = tarefa;
+		tarefa.fase = "rodando";
 		// uma mensagem de progresso que vai sendo editada e some no fim. Ela é só um enfeite: se falhar, o pedido segue
 		const aviso = await saida.dizer(canal, { text: FAREJANDO }).catch(() => undefined);
 		try {
 			const resposta = await responder(canal, tarefa.textos.join("\n"), async (progresso) => {
-				if (aviso) await saida.editar(canal, aviso, progresso).catch(console.log);
-			});
+				if (aviso && !sinal.aborted) await saida.editar(canal, aviso, progresso).catch(console.log);
+			}, sinal);
+			// cancelado: a resposta velha nunca chega no Slack, mesmo se o grafo já tinha terminado
+			if (sinal.aborted) return;
+			tarefa.fase = "respondendo";
 			console.log("O bot respondeu: " + resposta);
 			await saida.dizer(canal, { text: resposta });
 		} catch (erro: any) {
+			if (sinal.aborted) return console.log(`[canal] pedido cancelado: ${tarefa.textos.join(" / ").slice(0, 100)}`);
 			console.log("Deu erro: ", erro);    // o erro técnico fica no log; a pessoa lê o que aconteceu e o que fazer
-			await saida.dizer(canal, { text: explicarErro(erro) }).catch(console.log);
+			await dizer(canal, explicarErro(erro));
 		} finally {
+			tarefa.fase = "feito";
+			estado.atual = null;
 			if (aviso) await saida.apagar(canal, aviso).catch(console.log);
 		}
 	}
@@ -120,19 +179,73 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 		}
 	}
 
-	// compactar e excluir entram na fila do canal: esperam o pedido que está rodando terminar.
-	// Excluir com pedido rodando ou esperando é recusado, porque o pedido escreveria de novo o que acabou de ser apagado
+	// compactar entra na fila do canal: espera o pedido que está rodando terminar.
+	// Excluir cancela o pedido que está rodando (senão ele escreveria de volta o que acabou de ser apagado) e vai
+	// para a frente da fila; os pedidos que já estavam esperando vêm depois, numa conversa nova
 	function comando(canal: string, qual: "compactar" | "excluir") {
-		if (qual === "excluir" && doCanal(canal).trabalhando) {
-			return Promise.resolve("Estou terminando outra coisa nesta conversa. Espere a minha resposta e mande `excluir contexto` de novo.");
-		}
 		const { promise, resolve } = Promise.withResolvers<string>();
-		enfileirar(canal, { tipo: "comando", comando: qual, terminou: resolve });
+		if (qual === "excluir") cancelar(canal, "a pessoa pediu para excluir o contexto");
+		enfileirar(canal, { tipo: "comando", comando: qual, terminou: resolve }, qual === "excluir");
 		return promise;
 	}
 
-	// o retrato não muda nada, então não espera a fila
-	// se o Slack recusar os botões, o retrato vai só em texto: a pessoa não pode ficar sem ele
+	// ---------- O JUIZ ----------
+	// a resposta do modelo passa pelo zod (Decisao); qualquer erro, ou o prazo vencendo, vira fila
+	async function julgar(canal: string, emAndamento: string, nova: string) {
+		let pararPrazo = () => {};
+		const desistir = new AbortController();    // o prazo venceu: a chamada ao modelo para, e não gasta crédito à toa
+		try {
+			const prazo = new Promise<never>((_, falhar) => {
+				pararPrazo = relogio.depois(PRAZO_DO_JUIZ, () => {
+					desistir.abort();
+					falhar(new Error(`passou de ${PRAZO_DO_JUIZ / 1000} s`));
+				});
+			});
+			const juiz = modelos.especialista.withStructuredOutput(Decisao, { name: "decidir", method: "functionCalling" });
+			const chamada = juiz.invoke([new SystemMessage(INSTRUCOES_DO_JUIZ), new HumanMessage(`Pedido em andamento:\n${emAndamento}\n\nMensagem nova:\n${nova}`)], { callbacks: rastrear(canal, rotuloDosModelos()), signal: desistir.signal });
+			chamada.catch(() => {});    // se o prazo vencer antes, o erro que vier depois não pode derrubar o bot
+			return { ...(await Promise.race([chamada, prazo])), certo: true };
+		} catch (erro: any) {
+			return { decisao: "fila" as const, motivo: `o juiz falhou (${erro?.message}); na dúvida, fila`, certo: false };
+		} finally {
+			pararPrazo();
+		}
+	}
+
+	async function decidir(canal: string, lote: string[]) {
+		const estado = doCanal(canal);
+		// o pedido que vai responder: o que está rodando, ou o primeiro da fila, que ainda nem começou (o refazer de agora há pouco)
+		const rodando = estado.atual && estado.atual.fase === "rodando" && !estado.atual.controle.signal.aborted ? estado.atual : null;
+		const alvo = rodando ?? estado.fila.find((tarefa): tarefa is Pedido => tarefa.tipo === "pedido");
+		if (!alvo) {
+			if (estado.trabalhando) await dizer(canal, PEGUEI);    // um compactar ou excluir rodando
+			return enfileirar(canal, novoPedido(lote));
+		}
+		const { decisao, motivo, certo } = await julgar(canal, alvo.textos.join("\n"), lote.join("\n"));
+		console.log(`[juiz] ${decisao}: ${motivo}`);
+		anotarNoPainel(canal, "juiz", `${decisao}: ${motivo}`);
+		anotar(canal, "juiz_das_mensagens", certo, `${decisao}: ${motivo}`);
+		if (decisao === "ignorar_espera") return;
+		// o juiz leva segundos, e nesse tempo o alvo pode ter mudado de fase. Olha onde ele está AGORA:
+		//   cancelado por outro motivo (um "excluir contexto"): as mensagens dele não voltam, o lote vai sozinho;
+		//   respondendo ou feito: tarde para refazer, a resposta já saiu. O lote vai para a fila;
+		//   na fila: ainda não leu o texto, o lote entra nele;
+		//   rodando: cancela, e um pedido novo com as mensagens dele e as do lote vai para a frente da fila
+		if (decisao === "fila" || alvo.controle.signal.aborted || alvo.fase === "respondendo" || alvo.fase === "feito") {
+			await dizer(canal, PEGUEI);
+			return enfileirar(canal, novoPedido(lote));
+		}
+		if (alvo.fase === "fila") {
+			alvo.textos.push(...lote);
+			return void (await dizer(canal, REFAZENDO));
+		}
+		cancelar(canal, "a mensagem nova muda o pedido");
+		enfileirar(canal, novoPedido([...alvo.textos, ...lote]), true);
+		await dizer(canal, REFAZENDO);
+	}
+
+	// o retrato não muda nada, então não espera a fila.
+	// Se o Slack recusar os botões, o retrato vai só em texto: a pessoa não pode ficar sem ele
 	async function verContexto(canal: string) {
 		const texto = retratoParaSlack(await retratoDaConversa(canal));
 		await saida.dizer(canal, { text: texto, blocks: blocosDoContexto(texto) }).catch((erro) => {
@@ -141,28 +254,43 @@ export function criarCanais(saida: Saida, opcoes: Opcoes = {}) {
 		});
 	}
 
-	// compactar e excluir esperam a fila: com outra coisa rodando, a pessoa fica sabendo que entrou
+	// compactar espera a fila: com outra coisa rodando, a pessoa fica sabendo que entrou
 	async function pedirComando(canal: string, qual: "compactar" | "excluir") {
-		if (qual === "compactar" && doCanal(canal).trabalhando) await saida.dizer(canal, { text: PEGUEI }).catch(console.log);
-		await saida.dizer(canal, { text: await comando(canal, qual) }).catch(console.log);
+		if (qual === "compactar" && doCanal(canal).trabalhando) await dizer(canal, PEGUEI);
+		await dizer(canal, await comando(canal, qual));
 	}
 
 	// ---------- A PORTA DE ENTRADA ----------
-	// devolve quando a mensagem foi encaminhada; quem precisa esperar o trabalho acabar usa vazio()
+	// devolve na hora: o lote espera o cronômetro. Quem precisa esperar o trabalho acabar usa vazio()
 	async function receber(canal: string, texto: string) {
 		const qual = comandoDeContexto(texto);
-		if (qual === "ver") return verContexto(canal).catch((erro) => saida.dizer(canal, { text: explicarErro(erro) }).catch(console.log));
+		if (qual === "ver") return verContexto(canal).catch((erro) => dizer(canal, explicarErro(erro)));
 		if (qual) return pedirComando(canal, qual);
-		if (doCanal(canal).trabalhando) await saida.dizer(canal, { text: PEGUEI }).catch(console.log);
-		enfileirar(canal, { tipo: "pedido", textos: [texto] });
+		const estado = doCanal(canal);
+		estado.chegando.push(texto);
+		estado.pararCronometro?.();
+		estado.pararCronometro = relogio.depois(ESPERA_POR_MAIS, () => {
+			estado.pararCronometro = null;
+			const lote = estado.chegando.splice(0);
+			estado.decidindo = estado.decidindo.then(() => decidir(canal, lote)).catch((erro) => console.log(`[canal] a decisão quebrou: ${erro?.message}`));
+		});
+		const ate = new Date(Date.now() + ESPERA_POR_MAIS).toISOString();
+		anotarNoPainel(canal, "espera", `esperando mais mensagens (${ESPERA_POR_MAIS / 1000} s): ${estado.chegando.length} até agora`, { ate });
 	}
 
 	// o botão do Slack: a mesma ação do texto exato, com a resposta no canal
 	const botao = pedirComando;
 
-	// para os testes (e para quem precisa saber que o canal sossegou): espera a fila do canal esvaziar
+	// para os testes (e para quem precisa saber que o canal sossegou): espera as decisões e a fila do canal acabarem.
+	// O lote que ainda espera o cronômetro não conta
 	async function vazio(canal: string) {
-		while (doCanal(canal).trabalhando) await doCanal(canal).trabalho;
+		const estado = doCanal(canal);
+		for (;;) {
+			const decisoes = estado.decidindo;
+			await decisoes;
+			while (estado.trabalhando) await estado.trabalho;
+			if (estado.decidindo === decisoes) return;
+		}
 	}
 
 	// o painel ao vivo usa as mesmas ações, pela mesma fila (brain/live.ts recebe isto em ligarPainel)

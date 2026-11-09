@@ -52,6 +52,6 @@ Os valores ficam só no `.env`, que nunca vai para o git. Cite só os nomes.
 | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` | `brain/tracing.ts`, `quality/failures.ts` | não: sem elas nada é enviado |
 | `EMAIL_CHAVE`, `EMAIL_DE`, `EMAIL_PARA` | `sources/email.ts` | não: sem elas o e-mail fica desligado |
 | `MODELO`, `DADOS`, `MEMORIA` | grafo, banco e checkpoint | não: trocam modelo e bancos (`:memory:` nos testes e na prova) |
-| `MODELO_FORTE`, `MODELO_ESPECIALISTA` | `brain/models.ts` (grafo, prova, juiz de escrita e painel leem dali) | não: sem elas, o forte é `glm-5.3` e o barato `glm-5.3-flash`, escolha da pessoa em 08/11. O forte é do orquestrador e do redator; o barato, dos especialistas e dos agentes de contexto e de memória. `MODELO` troca os dois |
+| `MODELO_FORTE`, `MODELO_ESPECIALISTA` | `brain/models.ts` (grafo, prova, juiz de escrita e painel leem dali) | não: sem elas, o forte é `glm-5.3` e o barato `glm-5.3-flash`, escolha da pessoa em 08/11. O forte é do orquestrador e do redator; o barato, dos especialistas, dos agentes de contexto e de memória, do compactar do contexto e do juiz das mensagens seguidas (`brain/context.ts`, `brain/channel.ts`). `MODELO` troca os dois |
 | `PARTE`, `CENARIOS`, `AMOSTRA`, `RESULTADOS`, `REJULGAR`, `REFAZER`, `JUIZ` | `quality/exam.ts`, `quality/style-judge.ts` | não: os cabeçalhos desses arquivos explicam |
 | `CREDITO` | `quality/verify-feature.ts` | não: `CREDITO=1` libera item com a prova na `verification`, só com o ok da pessoa |

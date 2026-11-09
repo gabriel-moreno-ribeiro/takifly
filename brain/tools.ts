@@ -36,6 +36,9 @@ export type Caderno = {
 	// contava como a data "Natal" e soltava qualquer data, e o .at(-1) lia a preferência no lugar da última mensagem
 	preferencias?: string[];
 	conversa: string;            // de quem são os monitoramentos e as preferências
+	// o pedido foi cancelado (brain/channel.ts): o LangGraph para o stream, mas o nó que está rodando segue sozinho.
+	// Sem conferir isto, uma busca grande cancelada continuaria indo ao Google em segundo plano
+	sinal?: AbortSignal;
 };
 
 function cadernoDe(config: any): Caderno {
@@ -200,7 +203,9 @@ export function resumirVoos(voos: Voo[]) {
 async function pesquisar(caderno: Caderno, origem: string, destino: string, data: string, adultos: number, criancas: number, classe: string) {
 	const chave = [origem, destino, data, adultos, criancas, classe].join("|");
 	if (caderno.buscas.includes(chave)) return null;
+	caderno.sinal?.throwIfAborted();
 	if (caderno.buscas.length >= BUSCAS_SEM_PAUSA) await servicos.esperar(PAUSA_ENTRE_BUSCAS);
+	caderno.sinal?.throwIfAborted();
 	caderno.buscas.push(chave);
 
 	const buscar = () => servicos.buscarVoos(origem, destino, data, adultos, criancas, classe);

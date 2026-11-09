@@ -778,9 +778,9 @@
 			"area": "brain",
 			"behavior": "Mensagens seguidas no mesmo canal esperam 5 s de silêncio e viram um pedido só. Mensagem nova com pedido rodando passa por um juiz (modelo barato, prazo curto): refazer cancela de verdade e junta as mensagens, fila espera o atual, ignorar_espera não faz nada; juiz que falha vale fila. O pedido cancelado não responde, não é retomado e o aviso de progresso dele some. O painel mostra a espera, a decisão do juiz e o cancelamento.",
 			"verification": "grep -q 'VÁRIAS MENSAGENS SEGUIDAS' quality/tests.ts && node quality/tests.ts",
-			"state": "active",
-			"evidence": "",
-			"notes": "madrugada de 08→09/11; FUTURE 10.3. A decisão do juiz vai ao Langfuse como nota (brain/tracing.ts)"
+			"state": "passing",
+			"evidence": "2026-11-09, commit fd515f3 com mudanças sem commit (brain/channel.ts, brain/graph.ts, brain/live.html, brain/models.ts, brain/tools.ts e mais 5): Tudo certo!",
+			"notes": "madrugada de 08→09/11; feito, em docs/AGENCIA.md, \"Memória, planilha e mensagens seguidas\". A decisão do juiz vai ao Langfuse como nota (brain/tracing.ts)"
 		}
 	]
 }

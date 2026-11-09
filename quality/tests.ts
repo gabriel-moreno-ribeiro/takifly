@@ -1657,7 +1657,7 @@ servicos.atualizarPlanilha = planilhaDeAntes;
 
 // ---------- VER, COMPACTAR E EXCLUIR O CONTEXTO ----------
 const { compactar, retratoDaConversa, retratoParaSlack } = await import("../brain/context.ts");
-const { blocosDoContexto, comandoDeContexto, criarCanais } = await import("../brain/channel.ts");
+const { blocosDoContexto, comandoDeContexto, criarCanais, FAREJANDO: FAREJANDO_DO_CANAL } = await import("../brain/channel.ts");
 // só o texto exato vira ação: um pedido de viagem com a palavra no meio segue para o grafo
 assert.equal(comandoDeContexto("contexto"), "ver");
 assert.equal(comandoDeContexto("  Contexto! "), "ver");
@@ -1699,7 +1699,10 @@ assert.ok(botoes.elements[1].confirm);
 const ditas: { canal: string; text: string; blocks?: unknown[] }[] = [];
 const saidaFalsa = { dizer: async (canal: string, mensagem: { text: string; blocks?: unknown[] }) => (ditas.push({ canal, ...mensagem }), `m${ditas.length}`), editar: async () => {}, apagar: async () => {} };
 const pedidosAoGrafo: string[] = [];
-const canaisFalsos = criarCanais(saidaFalsa, { responder: async (_canal: string, texto: string) => (pedidosAoGrafo.push(texto), "resposta do grafo") });
+// o cronômetro das mensagens seguidas (F73) vence na hora: aqui o assunto é o contexto
+const relogioJa = { depois: (_ms: number, fazer: () => void) => (queueMicrotask(fazer), () => {}) };
+const deixarAndar = async () => { for (let i = 0; i < 20; i++) await new Promise((pronto) => setImmediate(pronto)); };
+const canaisFalsos = criarCanais(saidaFalsa, { responder: async (_canal: string, texto: string) => (pedidosAoGrafo.push(texto), "resposta do grafo"), relogio: relogioJa });
 await canaisFalsos.receber(doContexto, "Contexto");
 assert.match(ditas.at(-1)!.text, /O que eu lembro desta conversa/);
 assert.ok(ditas.at(-1)!.blocks);
@@ -1772,18 +1775,20 @@ assert.match(await canaisFalsos.comando("falso-meio", "excluir"), /Não consegui
 assert.deepEqual((await naMemoria("falso-meio")).next, []);
 assert.equal((await naMemoria("falso-meio")).values.messages?.length ?? 0, 0);
 
-// excluir com pedido rodando: recusado, para o pedido não escrever de volta o que acabou de ser apagado
-const pedidoPreso = Promise.withResolvers<string>();
-const canaisOcupados = criarCanais(saidaFalsa, { responder: () => pedidoPreso.promise });
+// excluir com pedido rodando: o pedido é cancelado antes (F73), senão escreveria de volta o que acabou de ser apagado
+const canaisOcupados = criarCanais(saidaFalsa, { relogio: relogioJa, responder: (_canal: string, _texto: string, _avisar: unknown, sinal?: AbortSignal) => new Promise<string>((_, falhar) => sinal?.addEventListener("abort", () => falhar(new Error("cancelado")))) });
 await canaisOcupados.receber("falso-ocupado", "voos para Lisboa");
-await canaisOcupados.receber("falso-ocupado", "excluir contexto");
-assert.match(ditas.at(-1)!.text, /^Estou terminando outra coisa nesta conversa/);
-pedidoPreso.resolve("ok");
+await deixarAndar();
+const ditasAntesDoExcluir = ditas.length;
+assert.match(await canaisOcupados.comando("falso-ocupado", "excluir"), /^Esta conversa ainda não tem nada guardado/);
 await canaisOcupados.vazio("falso-ocupado");
+assert.equal(ditas.length, ditasAntesDoExcluir);    // o pedido cancelado não respondeu nada
+assert.ok(avisosDoPainel.some((aviso) => aviso.conversa === "falso-ocupado" && aviso.no === "cancelado"));
 // compactar com pedido rodando espera ele terminar, e só então mexe na memória
 const outroPreso = Promise.withResolvers<string>();
-const canaisNaEspera = criarCanais(saidaFalsa, { responder: () => outroPreso.promise });
+const canaisNaEspera = criarCanais(saidaFalsa, { responder: () => outroPreso.promise, relogio: relogioJa });
 await canaisNaEspera.receber("falso-na-espera", "voos para Lisboa");
+await deixarAndar();
 let compactou = false;
 const compactando = canaisNaEspera.comando("falso-na-espera", "compactar").then((texto) => (compactou = true, texto));
 await new Promise((pronto) => setTimeout(pronto, 50));
@@ -1814,6 +1819,287 @@ assert.equal((await naMemoria("falso-contexto-painel")).values.messages?.length 
 assert.match(avisosDoPainel.filter((aviso) => aviso.conversa === "falso-contexto-painel" && aviso.no === "contexto").at(-1)!.detalhe, /^excluiu: /);
 painelDoContexto.closeAllConnections();
 painelDoContexto.close();
+
+// ---------- VÁRIAS MENSAGENS SEGUIDAS ----------
+const { ESPERA_POR_MAIS, PEGUEI, PRAZO_DO_JUIZ, REFAZENDO } = await import("../brain/channel.ts");
+// um relógio de mentira: o teste anda com o tempo na mão, sem esperar 5 s de verdade
+function relogioFalso() {
+	let agora = 0;
+	const marcados: { quando: number; fazer: () => void }[] = [];
+	return {
+		depois(ms: number, fazer: () => void) {
+			const marcado = { quando: agora + ms, fazer };
+			marcados.push(marcado);
+			return () => { if (marcados.includes(marcado)) marcados.splice(marcados.indexOf(marcado), 1); };
+		},
+		async avancar(ms: number) {
+			const ate = agora + ms;
+			for (;;) {
+				const proximo = marcados.filter((marcado) => marcado.quando <= ate).toSorted((a, b) => a.quando - b.quando)[0];
+				if (!proximo) break;
+				marcados.splice(marcados.indexOf(proximo), 1);
+				agora = proximo.quando;
+				proximo.fazer();
+				await deixarAndar();
+			}
+			agora = ate;
+			await deixarAndar();
+		},
+	};
+}
+// um grafo de mentira que só responde quando o teste manda, e que o cancelamento derruba como o de verdade
+// atraso: quanto o cancelamento leva para derrubar o pedido (o de verdade desfaz o pedido no checkpointer antes)
+function grafoNaMao(atraso = 0) {
+	const pedidos: { texto: string; responder: (texto: string) => void; cancelado: boolean }[] = [];
+	const responder = (_canal: string, texto: string, avisar: (progresso: string) => unknown, sinal?: AbortSignal) => new Promise<string>((ok, falhar) => {
+		const pedido = { texto, responder: ok, cancelado: false };
+		pedidos.push(pedido);
+		void avisar("procurando...");
+		sinal?.addEventListener("abort", () => {
+			pedido.cancelado = true;
+			if (atraso === 0) falhar(new Error("cancelado"));
+			else setTimeout(() => falhar(new Error("cancelado")), atraso);
+		});
+	});
+	return { pedidos, responder };
+}
+const decide = (decisao: string, motivo: string) => pediu("decidir", { decisao, motivo });
+const slack: { canal: string; text: string; id: string }[] = [];
+const apagadas: string[] = [];
+const saidaDoSlack = {
+	dizer: async (canal: string, mensagem: { text: string }) => { const id = `s${slack.length + 1}`; slack.push({ canal, text: mensagem.text, id }); return id; },
+	editar: async () => {},
+	apagar: async (_canal: string, id: string) => { apagadas.push(id); },
+};
+const textosDe = (canal: string) => slack.filter((mensagem) => mensagem.canal === canal).map((mensagem) => mensagem.text);
+
+// três mensagens em 3 s viram um pedido só, com as mensagens uma por linha
+let cronometro = relogioFalso();
+let naMao = grafoNaMao();
+let canais = criarCanais(saidaDoSlack, { responder: naMao.responder, relogio: cronometro });
+await canais.receber("falso-seguidas", "voos de GRU para LIS");
+await cronometro.avancar(1500);
+await canais.receber("falso-seguidas", "dia 12/12");
+await cronometro.avancar(1500);
+await canais.receber("falso-seguidas", "só ida");
+await cronometro.avancar(ESPERA_POR_MAIS - 1);
+assert.equal(naMao.pedidos.length, 0);    // o cronômetro foi zerado na última mensagem
+await cronometro.avancar(1);
+assert.deepEqual(naMao.pedidos.map((pedido) => pedido.texto), ["voos de GRU para LIS\ndia 12/12\nsó ida"]);
+assert.ok(avisosDoPainel.some((aviso) => aviso.conversa === "falso-seguidas" && aviso.no === "espera" && aviso.ate));
+naMao.pedidos[0].responder("Achei voos.");
+await canais.vazio("falso-seguidas");
+assert.deepEqual(textosDe("falso-seguidas"), [":taki: O Taki está farejando...", "Achei voos."]);
+
+// a mensagem a 4,9 s zera o cronômetro: o pedido só sai 5 s depois dela
+await canais.receber("falso-zera", "voos para Roma");
+await cronometro.avancar(4900);
+await canais.receber("falso-zera", "em 20/12");
+await cronometro.avancar(4900);
+assert.equal(naMao.pedidos.filter((pedido) => pedido.texto.includes("Roma")).length, 0);
+await cronometro.avancar(100);
+assert.deepEqual(naMao.pedidos.at(-1)!.texto, "voos para Roma\nem 20/12");
+naMao.pedidos.at(-1)!.responder("ok");
+await canais.vazio("falso-zera");
+
+// refazer: o pedido em andamento é cancelado e um novo começa com as mensagens dele e a nova.
+// A resposta velha nunca chega, e o aviso de progresso dele é apagado
+cronometro = relogioFalso();
+naMao = grafoNaMao();
+canais = criarCanais(saidaDoSlack, { responder: naMao.responder, relogio: cronometro });
+await canais.receber("falso-refazer", "voos de GRU para LIS em 12/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+const avisoDoPrimeiro = slack.at(-1)!.id;
+Object.assign(modelos, { especialista: new ModeloFalso([decide("refazer", "mudou a data")]) });
+await canais.receber("falso-refazer", "na verdade é dia 15");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.equal(naMao.pedidos[0].cancelado, true);
+assert.deepEqual(naMao.pedidos.map((pedido) => pedido.texto), ["voos de GRU para LIS em 12/12", "voos de GRU para LIS em 12/12\nna verdade é dia 15"]);
+assert.ok(apagadas.includes(avisoDoPrimeiro));
+naMao.pedidos[0].responder("resposta velha");    // mesmo se o grafo velho terminasse agora, nada sai
+naMao.pedidos[1].responder("Achei voos para o dia 15.");
+await canais.vazio("falso-refazer");
+assert.deepEqual(textosDe("falso-refazer").filter((texto) => !texto.includes("farejando")), [REFAZENDO, "Achei voos para o dia 15."]);
+// o painel mostra a decisão do juiz com o motivo e o cancelamento; o juiz leu o pedido e a mensagem nova
+const notasDoRefazer = avisosDoPainel.filter((aviso) => aviso.conversa === "falso-refazer" && aviso.fase === "nota").map((aviso) => `${aviso.no}: ${aviso.detalhe}`);
+assert.ok(notasDoRefazer.includes("juiz: refazer: mudou a data"));
+assert.ok(notasDoRefazer.includes("cancelado: pedido cancelado: a mensagem nova muda o pedido"));
+
+// fila: outro assunto. O pedido não é cancelado, a pessoa ganha o "Peguei" e o novo vem depois
+const juizDaFila = new ModeloFalso([decide("fila", "outro assunto")]);
+Object.assign(modelos, { especialista: juizDaFila });
+await canais.receber("falso-refazer", "voos de GRU para REC em 13/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-refazer", "e hotel em Recife?");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.match(textoDa(juizDaFila.cartas[0]), /Pedido em andamento:\nvoos de GRU para REC em 13\/12\n\nMensagem nova:\ne hotel em Recife\?/);
+assert.equal(naMao.pedidos.at(-1)!.cancelado, false);
+assert.equal(textosDe("falso-refazer").at(-1), PEGUEI);
+naMao.pedidos.at(-1)!.responder("Voos para Recife.");
+await deixarAndar();
+assert.equal(naMao.pedidos.at(-1)!.texto, "e hotel em Recife?");
+naMao.pedidos.at(-1)!.responder("Hotéis em Recife.");
+await canais.vazio("falso-refazer");
+assert.deepEqual(textosDe("falso-refazer").slice(-3).filter((texto) => !texto.includes("farejando")), ["Voos para Recife.", "Hotéis em Recife."]);
+
+// ignorar_espera: "valeu" não cancela nem cria pedido
+Object.assign(modelos, { especialista: new ModeloFalso([decide("ignorar_espera", "só agradeceu")]) });
+await canais.receber("falso-refazer", "voos de GRU para SSA em 14/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+const pedidosAntes = naMao.pedidos.length;
+await canais.receber("falso-refazer", "valeu");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.equal(naMao.pedidos.length, pedidosAntes);
+assert.equal(naMao.pedidos.at(-1)!.cancelado, false);
+naMao.pedidos.at(-1)!.responder("Voos para Salvador.");
+await canais.vazio("falso-refazer");
+
+// o juiz que quebra cai em fila: nada é cancelado e nenhuma mensagem se perde
+Object.assign(modelos, { especialista: new ModeloFalso([new Error("a Ollama recusou")]) });
+await canais.receber("falso-juiz-quebra", "voos de GRU para POA em 15/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-juiz-quebra", "e para FLN?");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.equal(naMao.pedidos.at(-1)!.cancelado, false);
+assert.equal(textosDe("falso-juiz-quebra").at(-1), PEGUEI);
+assert.match(avisosDoPainel.filter((aviso) => aviso.conversa === "falso-juiz-quebra" && aviso.no === "juiz").at(-1)!.detalhe, /^fila: o juiz falhou/);
+naMao.pedidos.at(-1)!.responder("Voos para Porto Alegre.");
+await deixarAndar();
+assert.equal(naMao.pedidos.at(-1)!.texto, "e para FLN?");
+naMao.pedidos.at(-1)!.responder("Voos para Florianópolis.");
+await canais.vazio("falso-juiz-quebra");
+
+// o juiz que demora mais que o prazo também cai em fila
+class ModeloQueNaoResponde extends ModeloFalso {
+	async _generate(): Promise<any> {
+		return new Promise(() => {});
+	}
+}
+Object.assign(modelos, { especialista: new ModeloQueNaoResponde([]) });
+await canais.receber("falso-juiz-lento", "voos de GRU para BSB em 16/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-juiz-lento", "e a volta?");
+await cronometro.avancar(ESPERA_POR_MAIS);
+assert.equal(textosDe("falso-juiz-lento").at(-1), FAREJANDO_DO_CANAL);    // o juiz ainda pensa: nada decidido
+await cronometro.avancar(PRAZO_DO_JUIZ);
+assert.equal(textosDe("falso-juiz-lento").at(-1), PEGUEI);
+assert.equal(naMao.pedidos.at(-1)!.cancelado, false);
+naMao.pedidos.at(-1)!.responder("Voos para Brasília.");
+await deixarAndar();
+naMao.pedidos.at(-1)!.responder("A volta.");
+await canais.vazio("falso-juiz-lento");
+
+// dois lotes seguidos com refazer: o segundo chega quando o pedido refeito acabou de começar. Ele também é cancelado
+// e refeito com tudo junto: nenhuma mensagem se perde (antes, "e para 2 pessoas" sumia)
+// o juiz leva 30 ms em cada lote e o cancelamento leva 10 ms: o segundo lote começa a ser decidido com o pedido refeito
+// ainda na fila, e quando o juiz responde ele já está rodando (já leu o texto)
+class JuizComAtraso extends ModeloFalso {
+	async _generate(carta: BaseMessage[]): Promise<any> {
+		await new Promise((pronto) => setTimeout(pronto, 30));
+		return super._generate(carta);
+	}
+}
+naMao = grafoNaMao(10);
+canais = criarCanais(saidaDoSlack, { responder: naMao.responder, relogio: cronometro });
+Object.assign(modelos, { especialista: new JuizComAtraso([decide("refazer", "mudou a data"), decide("refazer", "mais gente")]) });
+await canais.receber("falso-dois-lotes", "voos GRU LIS 12/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-dois-lotes", "na verdade dia 15");
+await cronometro.avancar(ESPERA_POR_MAIS);    // o juiz do primeiro lote começa a pensar
+await canais.receber("falso-dois-lotes", "e para 2 pessoas");
+await cronometro.avancar(ESPERA_POR_MAIS);    // e o segundo lote entra na fila das decisões
+await new Promise((pronto) => setTimeout(pronto, 200));
+await deixarAndar();
+await cronometro.avancar(0);
+await new Promise((pronto) => setTimeout(pronto, 200));
+await deixarAndar();
+assert.deepEqual(naMao.pedidos.map((pedido) => pedido.cancelado), [true, true, false]);
+assert.equal(naMao.pedidos.at(-1)!.texto, "voos GRU LIS 12/12\nna verdade dia 15\ne para 2 pessoas");
+naMao.pedidos.at(-1)!.responder("ok");
+await canais.vazio("falso-dois-lotes");
+
+// "excluir contexto" enquanto o juiz pensa: o pedido apagado não volta; a mensagem nova vai sozinha
+const juizDemorado = Promise.withResolvers<void>();
+class JuizQueEspera extends ModeloFalso {
+	async _generate(carta: BaseMessage[]): Promise<any> {
+		await juizDemorado.promise;
+		return super._generate(carta);
+	}
+}
+Object.assign(modelos, { especialista: new JuizQueEspera([decide("refazer", "mudou a data")]) });
+await canais.receber("falso-excluir-no-meio", "voos GRU REC 12/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-excluir-no-meio", "na verdade dia 15");
+await cronometro.avancar(ESPERA_POR_MAIS);    // o juiz começou a pensar
+const excluindo = canais.comando("falso-excluir-no-meio", "excluir");
+await deixarAndar();
+juizDemorado.resolve();
+await excluindo;
+await deixarAndar();
+assert.equal(naMao.pedidos.at(-1)!.texto, "na verdade dia 15");
+naMao.pedidos.at(-1)!.responder("ok");
+await canais.vazio("falso-excluir-no-meio");
+
+// o grafo terminou, mas o cancelamento chegou antes da resposta sair: ela não sai (o grafo de mentira aqui ignora o sinal)
+const respostasPresas: ((texto: string) => void)[] = [];
+canais = criarCanais(saidaDoSlack, { relogio: cronometro, responder: () => new Promise<string>((ok) => respostasPresas.push(ok)) });
+Object.assign(modelos, { especialista: new ModeloFalso([decide("refazer", "mudou a data")]) });
+await canais.receber("falso-tarde", "voos GRU SSA 12/12");
+await cronometro.avancar(ESPERA_POR_MAIS);
+await canais.receber("falso-tarde", "dia 13");
+await cronometro.avancar(ESPERA_POR_MAIS);
+respostasPresas[0]("resposta velha do dia 12");
+await deixarAndar();
+respostasPresas[1]?.("resposta do dia 13");
+await canais.vazio("falso-tarde");
+assert.ok(!textosDe("falso-tarde").includes("resposta velha do dia 12"));
+assert.ok(textosDe("falso-tarde").includes("resposta do dia 13"));
+
+// cancelado no meio de uma busca grande: nenhuma busca nova vai ao Google depois do cancelamento
+const paraABusca = new AbortController();
+let buscasFeitas = 0;
+const buscaDoTeste = servicos.buscarVoos;
+servicos.buscarVoos = (async (origem: string, destino: string, data: string) => {
+	if (++buscasFeitas === 2) paraABusca.abort();
+	return [{ ...voo, origem, destino, data }];
+}) as any;
+await chamar("buscar_voos", { origem: "São Paulo", destino: "LIS", data: "12/12", ate: "13/12" }, { ...cadernoNovo(["voos de São Paulo para LIS de 12/12 a 13/12"]), sinal: paraABusca.signal });
+assert.equal(buscasFeitas, 2);    // eram 6
+servicos.buscarVoos = buscaDoTeste;
+
+// o cancelamento de verdade, no grafo: o pedido cancelado sai do checkpointer (nem mensagem nem voo dele ficam),
+// nada fica para retomar, e a mensagem seguinte responde normal, sem o "Não consegui terminar o pedido anterior"
+class ModeloPreso extends ModeloFalso {
+	chamado = Promise.withResolvers<void>();
+	async _generate(carta: BaseMessage[], opcoes: any): Promise<any> {
+		if (this.roteiro.length > 0) return super._generate(carta);
+		this.chamado.resolve();
+		return new Promise((_, falhar) => opcoes?.signal?.addEventListener("abort", () => falhar(new Error("cancelado"))));
+	}
+}
+await rodarComFalsos("falso-cancelado", "oi", [planoFalso(), new AIMessage("Oi!")], []);
+const antesDoCancelado = (await naMemoria("falso-cancelado")).values;
+const redatorPreso = new ModeloPreso([planoFalso("pesquisador")]);
+Object.assign(modelos, { forte: redatorPreso, especialista: new ModeloFalso([pediu("buscar_voos", { origem: "GRU", destino: "REC", data: "19/12" }), new AIMessage("pronto")]) });
+const controle = new AbortController();
+const progressoDoCancelado: string[] = [];
+const cancelando = responder("falso-cancelado", "voos de GRU para REC em 19/12", (progresso: string) => { progressoDoCancelado.push(progresso); }, controle.signal);
+await redatorPreso.chamado.promise;    // o redator está escrevendo a resposta
+controle.abort();
+await assert.rejects(cancelando);
+const depoisDoCancelado = await naMemoria("falso-cancelado");
+assert.deepEqual(depoisDoCancelado.next, []);
+assert.deepEqual(depoisDoCancelado.values.messages.map((mensagem: BaseMessage) => mensagem.text), antesDoCancelado.messages.map((mensagem: BaseMessage) => mensagem.text));
+assert.equal(depoisDoCancelado.values.voos.length, antesDoCancelado.voos.length);
+const progressoAteCancelar = progressoDoCancelado.length;
+Object.assign(modelos, { forte: new ModeloFalso([planoFalso(), new AIMessage("Tudo certo por aqui.")]), especialista: new ModeloFalso([]) });
+assert.equal(await responder("falso-cancelado", "tudo bem?"), "Tudo certo por aqui.");
+assert.equal(progressoDoCancelado.length, progressoAteCancelar);    // o pedido cancelado não mexe mais no aviso
+// cancelado antes de começar: nem chega ao grafo
+const jaCancelado = new AbortController();
+jaCancelado.abort();
+await assert.rejects(responder("falso-cancelado", "voos", () => {}, jaCancelado.signal));
+assert.equal((await naMemoria("falso-cancelado")).values.messages.length, 4);
 
 // ---------- O PAINEL AO VIVO ----------
 // o ouvinte vê cada nó começar e terminar, na ordem em que o grafo roda, e cada chamada de modelo
